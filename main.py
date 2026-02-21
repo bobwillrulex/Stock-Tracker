@@ -26,6 +26,7 @@ STATE_PATH = "run_state.json"
 RUN_HOUR = 16             # 4 PM
 RUN_MINUTE = 2            # 4:02 PM
 WEEKLY_STATE = "weekly_state.json"
+SIGNALS_CSV_PATH = "buy_signals.csv"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 print(f"Using device: {DEVICE}")
@@ -35,6 +36,45 @@ BATCH_SIZE = 64
 LR_GLOBAL = 0.001
 LR_FINE_TUNE = 0.0001
 INPUT_SIZE = 6  # Matches your features list: Log_Ret, RSI, ATR, EMA20, EMA50, Vol_Change
+
+
+def get_ticker_metadata(ticker):
+    """Fetch stock name and market cap for reporting."""
+    try:
+        info = yf.Ticker(ticker).info
+        return {
+            "ticker": ticker,
+            "stock_name": info.get("shortName") or info.get("longName") or ticker,
+            "marketcap": info.get("marketCap") or 0,
+        }
+    except Exception:
+        return {
+            "ticker": ticker,
+            "stock_name": ticker,
+            "marketcap": 0,
+        }
+
+
+def write_buy_signals_csv(signals, path=SIGNALS_CSV_PATH):
+    """Write buy signals sorted by market cap to CSV."""
+    if not signals:
+        pd.DataFrame(columns=["percentage", "stock_name", "ticker", "marketcap"]).to_csv(path, index=False)
+        print(f"No buy signals found. Wrote empty CSV to {path}.")
+        return
+
+    rows = []
+    for signal in signals:
+        metadata = get_ticker_metadata(signal["ticker"])
+        rows.append({
+            "percentage": round(signal["predicted_return"] * 100, 2),
+            "stock_name": metadata["stock_name"],
+            "ticker": metadata["ticker"],
+            "marketcap": metadata["marketcap"],
+        })
+
+    report_df = pd.DataFrame(rows).sort_values(by="marketcap", ascending=False)
+    report_df.to_csv(path, index=False)
+    print(f"Wrote {len(report_df)} buy signals to {path} (sorted by market cap).")
 
 def get_tickers():
     cache_file = "tickers_cache.json"
@@ -207,6 +247,7 @@ def run_daily():
     skipping = resume is not None
 
     print("Running daily scan...")
+    buy_signals = []
 
     # Save clean global weights once
     base_state = {k: v.clone() for k, v in model.state_dict().items()}
@@ -252,10 +293,12 @@ def run_daily():
             pred = model(X_pred.unsqueeze(0)).item()
             if pred > 0.02:
                 print(f"--- BUY SIGNAL: {t} | Expected 5D Return: {pred*100:.2f}% ---")
+                buy_signals.append({"ticker": t, "predicted_return": pred})
 
         time.sleep(0.1)
 
     torch.save(base_state, MODEL_PATH)
+    write_buy_signals_csv(buy_signals)
     save_state(None)
     print("Daily run complete.")
 
