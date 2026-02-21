@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import yfinance as yf
-import pandas_ta as ta
 import numpy as np
 import os
 import json
@@ -120,10 +119,22 @@ def process_dataframe(df):
         return None, None, None
 
     # Technical Indicators
-    df['RSI'] = ta.rsi(df['Close'], length=14)
-    df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'])
-    df['EMA20'] = ta.ema(df['Close'], length=20)
-    df['EMA50'] = ta.ema(df['Close'], length=50)
+    close_delta = df['Close'].diff()
+    gains = close_delta.where(close_delta > 0, 0.0)
+    losses = -close_delta.where(close_delta < 0, 0.0)
+    avg_gain = gains.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
+    avg_loss = losses.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    df['RSI'] = 100 - (100 / (1 + rs))
+
+    high_low = df['High'] - df['Low']
+    high_close_prev = (df['High'] - df['Close'].shift(1)).abs()
+    low_close_prev = (df['Low'] - df['Close'].shift(1)).abs()
+    true_range = np.maximum.reduce([high_low, high_close_prev, low_close_prev])
+    df['ATR'] = pd.Series(true_range, index=df.index).ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
+
+    df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
+    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['Log_Ret'] = np.log(df['Close'] / df['Close'].shift(1))
     df['Vol_Change'] = df['Volume'].pct_change()
     df['Target'] = df['Close'].shift(-5) / df['Close'] - 1
