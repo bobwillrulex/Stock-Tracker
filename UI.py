@@ -80,12 +80,59 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
     columns = ("percentage", "confidence", "stock_name", "ticker", "marketcap")
     tree = ttk.Treeview(root, columns=columns, show='headings')
+    sort_state = {"column": None, "ascending": True}
+    table_rows = []
 
-    tree.heading("percentage", text="Predicted %")
-    tree.heading("confidence", text="Confidence")
-    tree.heading("stock_name", text="Stock")
-    tree.heading("ticker", text="Ticker")
-    tree.heading("marketcap", text="Market Cap")
+    def sort_rows(rows, column, ascending):
+        numeric_columns = {"percentage", "confidence", "marketcap"}
+        if column in numeric_columns:
+            return sorted(rows, key=lambda row: float(row.get(column, 0) or 0), reverse=not ascending)
+
+        return sorted(
+            rows,
+            key=lambda row: str(row.get(column, "") or "").lower(),
+            reverse=not ascending,
+        )
+
+    def render_rows(rows):
+        for item_id in tree.get_children():
+            tree.delete(item_id)
+
+        for row in rows:
+            percentage_text = f"{row.get('percentage', 0):.2f}%"
+            confidence_text = f"{row.get('confidence', 0):.2f}%"
+            tree.insert(
+                '',
+                'end',
+                values=(
+                    percentage_text,
+                    confidence_text,
+                    row.get('stock_name', ''),
+                    row.get('ticker', ''),
+                    format_mcap(row.get('marketcap', 0)),
+                ),
+            )
+
+    def apply_sort_and_render():
+        rows = list(table_rows)
+        if sort_state["column"]:
+            rows = sort_rows(rows, sort_state["column"], sort_state["ascending"])
+        render_rows(rows)
+
+    def on_heading_click(column):
+        if sort_state["column"] == column:
+            sort_state["ascending"] = not sort_state["ascending"]
+        else:
+            sort_state["column"] = column
+            sort_state["ascending"] = True
+
+        apply_sort_and_render()
+
+    tree.heading("percentage", text="Predicted %", command=lambda: on_heading_click("percentage"))
+    tree.heading("confidence", text="Confidence", command=lambda: on_heading_click("confidence"))
+    tree.heading("stock_name", text="Stock", command=lambda: on_heading_click("stock_name"))
+    tree.heading("ticker", text="Ticker", command=lambda: on_heading_click("ticker"))
+    tree.heading("marketcap", text="Market Cap", command=lambda: on_heading_click("marketcap"))
 
     tree.column("percentage", width=120, anchor="center")
     tree.column("confidence", width=110, anchor="center")
@@ -121,28 +168,16 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     eta_label.pack(pady=2)
 
     def populate_table():
-        for item_id in tree.get_children():
-            tree.delete(item_id)
-
+        nonlocal table_rows
         rows = load_signals_from_csv(csv_path)
         if not rows:
+            table_rows = []
+            render_rows(table_rows)
             status_var.set("No saved signals found. Run the scanner to generate buy_signals.csv.")
             return
 
-        for row in rows:
-            percentage_text = f"{row.get('percentage', 0):.2f}%"
-            confidence_text = f"{row.get('confidence', 0):.2f}%"
-            tree.insert(
-                '',
-                'end',
-                values=(
-                    percentage_text,
-                    confidence_text,
-                    row.get('stock_name', ''),
-                    row.get('ticker', ''),
-                    format_mcap(row.get('marketcap', 0)),
-                ),
-            )
+        table_rows = rows
+        apply_sort_and_render()
 
         status_var.set(f"Loaded {len(rows)} signals. Double-click a row to open TradingView.")
 
