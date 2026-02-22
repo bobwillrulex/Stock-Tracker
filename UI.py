@@ -200,6 +200,8 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 mapped_progress = 5 + (current / total) * 45
             elif stage == "train":
                 mapped_progress = 50 + (current / total) * 50
+            elif stage == "scan":
+                mapped_progress = (current / total) * 100
             elif stage == "done":
                 mapped_progress = 100
             else:
@@ -278,7 +280,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         def worker():
             try:
                 tickers = main.get_tickers()
-                main.run_daily(tickers=tickers)
+                main.run_daily(tickers=tickers, progress_callback=progress_queue.put)
                 progress_queue.put({
                     "stage": "done",
                     "current": 1,
