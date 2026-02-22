@@ -4,6 +4,7 @@ import yfinance as yf
 import numpy as np
 import os
 import json
+from json import JSONDecodeError
 import time
 from datetime import datetime, timedelta
 from sklearn.preprocessing import StandardScaler
@@ -130,8 +131,12 @@ def get_tickers():
         if not is_fresh:
             return None
 
-        with open(cache_file, "r") as f:
-            cached = json.load(f)
+        try:
+            with open(cache_file, "r") as f:
+                cached = json.load(f)
+        except (OSError, JSONDecodeError):
+            print("Ticker cache is unreadable. Rebuilding cache from online sources...")
+            return None
 
         if not isinstance(cached, list):
             return None
@@ -469,8 +474,13 @@ class PatternScannerLSTM(nn.Module):
 # ==============================
 def load_state():
     if os.path.exists(STATE_PATH):
-        with open(STATE_PATH, "r") as f:
-            return json.load(f)
+        try:
+            with open(STATE_PATH, "r") as f:
+                state = json.load(f)
+            if isinstance(state, dict):
+                return state
+        except (OSError, JSONDecodeError):
+            print("run_state.json is empty/corrupt. Starting scan from first ticker.")
     return {"last_ticker": None}
 
 def save_state(ticker):
@@ -587,8 +597,13 @@ def wait_until_market_close():
 
 def load_weekly_state():
     if os.path.exists(WEEKLY_STATE):
-        with open(WEEKLY_STATE) as f:
-            return json.load(f).get("week")
+        try:
+            with open(WEEKLY_STATE) as f:
+                payload = json.load(f)
+            if isinstance(payload, dict):
+                return payload.get("week")
+        except (OSError, JSONDecodeError):
+            print("weekly_state.json is empty/corrupt. Weekly scheduler state reset.")
     return None
 
 def save_weekly_state(week):
