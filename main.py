@@ -491,9 +491,20 @@ def save_state(ticker):
 # ==============================
 # DAILY RUN
 # ==============================
-def run_daily(tickers=None):
+def run_daily(tickers=None, progress_callback=None):
+    def emit_progress(stage, current, total, message):
+        if progress_callback is not None:
+            progress_callback({
+                "stage": stage,
+                "current": current,
+                "total": total,
+                "message": message,
+            })
+
     if tickers is None:
         tickers = globals().get("TICKERS") or get_tickers()
+
+    total_tickers = max(len(tickers), 1)
 
     checkpoint = BEST_MODEL_PATH if os.path.exists(BEST_MODEL_PATH) else MODEL_PATH
     if os.path.exists(checkpoint):
@@ -510,15 +521,18 @@ def run_daily(tickers=None):
     skipping = resume is not None
 
     print("Running daily scan...")
+    emit_progress("scan", 0, total_tickers, "Starting daily scan...")
     buy_signals = []
 
     # Save clean global weights once
     base_state = {k: v.clone() for k, v in model.state_dict().items()}
 
+    processed = 0
     for t in tickers:
         if skipping:
             if t == resume:
                 skipping = False
+                emit_progress("scan", processed, total_tickers, f"Resuming scan from {t}...")
             continue
 
         print(f"Processing {t}")
@@ -529,9 +543,13 @@ def run_daily(tickers=None):
             X_train, y_train, _, _, X_pred = process_dataframe(ticker_df, val_split=0.1)
         except Exception as e:
             print(f"Error fetching {t}: {e}")
+            processed += 1
+            emit_progress("scan", processed, total_tickers, f"Daily scan: {processed}/{total_tickers} ({t})")
             continue
 
         if X_train is None:
+            processed += 1
+            emit_progress("scan", processed, total_tickers, f"Daily scan: {processed}/{total_tickers} ({t})")
             continue
 
         X_pred = X_pred.to(DEVICE)
@@ -554,6 +572,8 @@ def run_daily(tickers=None):
                 buy_signals.append({"ticker": t, "predicted_return": pred})
 
         time.sleep(0.1)
+        processed += 1
+        emit_progress("scan", processed, total_tickers, f"Daily scan: {processed}/{total_tickers} ({t})")
 
     torch.save(base_state, MODEL_PATH)
     write_buy_signals_csv(buy_signals)
