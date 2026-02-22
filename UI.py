@@ -101,6 +101,13 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     notebook = ttk.Notebook(root)
     notebook.pack(expand=True, fill="both", padx=10, pady=6)
 
+    sort_states = {
+        "ai": {"column": None, "ascending": True},
+        "macd": {"column": None, "ascending": True},
+        "rsi": {"column": None, "ascending": True},
+    }
+    rows_store = {"ai": [], "macd": [], "rsi": []}
+
     def build_tree_tab(tab_title, columns, headings, widths):
         frame = ttk.Frame(notebook)
         notebook.add(frame, text=tab_title)
@@ -218,18 +225,54 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 ),
             )
 
-    def populate_tables():
-        ai_rows = load_ai_rows(csv_path)
-        macd_rows = load_macd_rows()
-        rsi_rows = load_rsi_rows()
+    def sort_rows(table_name, rows):
+        state = sort_states[table_name]
+        column = state["column"]
+        if not column:
+            return rows
 
-        render_ai(ai_rows)
-        render_macd(macd_rows)
-        render_rsi(rsi_rows)
+        return sorted(rows, key=lambda row: row.get(column, ""), reverse=not state["ascending"])
+
+    def rerender_table(table_name):
+        rows = sort_rows(table_name, rows_store[table_name])
+        if table_name == "ai":
+            render_ai(rows)
+        elif table_name == "macd":
+            render_macd(rows)
+        elif table_name == "rsi":
+            render_rsi(rows)
+
+    def bind_sorting(tree, table_name, sortable_columns):
+        for column in sortable_columns:
+            heading_text = tree.heading(column, "text")
+
+            def on_sort_click(col=column):
+                state = sort_states[table_name]
+                if state["column"] == col:
+                    state["ascending"] = not state["ascending"]
+                else:
+                    state["column"] = col
+                    state["ascending"] = True
+                rerender_table(table_name)
+
+            tree.heading(column, text=heading_text, command=on_sort_click)
+
+    def populate_tables():
+        rows_store["ai"] = load_ai_rows(csv_path)
+        rows_store["macd"] = load_macd_rows()
+        rows_store["rsi"] = load_rsi_rows()
+
+        rerender_table("ai")
+        rerender_table("macd")
+        rerender_table("rsi")
 
         status_var.set(
-            f"Loaded AI={len(ai_rows)}, MACD={len(macd_rows)}, RSI={len(rsi_rows)}. Double-click any row to open TradingView."
+            f"Loaded AI={len(rows_store['ai'])}, MACD={len(rows_store['macd'])}, RSI={len(rows_store['rsi'])}. Double-click any row to open TradingView."
         )
+
+    bind_sorting(ai_tree, "ai", ("percentage", "confidence", "ticker", "marketcap"))
+    bind_sorting(macd_tree, "macd", ("ticker", "marketcap"))
+    bind_sorting(rsi_tree, "rsi", ("ticker", "marketcap"))
 
     def estimate_eta_seconds(event, stage_start_times):
         stage = event.get("stage", "")
