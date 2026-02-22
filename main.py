@@ -14,6 +14,7 @@ from sklearn.preprocessing import StandardScaler
 import pandas as pd
 import requests
 import io
+from bs4 import BeautifulSoup
 from torch.utils.data import DataLoader, TensorDataset
 
 # ==============================
@@ -77,37 +78,105 @@ def write_buy_signals_csv(signals, path=SIGNALS_CSV_PATH):
 
 def get_tickers():
     cache_file = "tickers_cache.json"
-    
-    # Check if cache exists and is fresh (less than 24h old)
-    if os.path.exists(cache_file):
+    min_expected_symbols = 100
+
+    def load_cached_tickers():
+        if not os.path.exists(cache_file):
+            return None
+
         mtime = os.path.getmtime(cache_file)
-        if (time.time() - mtime) < 86400:
-            with open(cache_file, "r") as f:
-                print("Loading tickers from cache...")
-                return json.load(f)
+        is_fresh = (time.time() - mtime) < 86400
+        if not is_fresh:
+            return None
+
+        with open(cache_file, "r") as f:
+            cached = json.load(f)
+
+        if not isinstance(cached, list):
+            return None
+
+        cached = [str(s).strip().upper() for s in cached if str(s).strip()]
+        if len(cached) < min_expected_symbols:
+            print(
+                f"Ticker cache only has {len(cached)} symbols; refreshing from sources..."
+            )
+            return None
+
+        print("Loading tickers from cache...")
+        return sorted(set(cached))
+
+    def get_symbol_column(df):
+        for col in df.columns:
+            normalized = str(col).strip().lower()
+            if "symbol" in normalized or "ticker" in normalized:
+                return col
+        return None
+    
+    cached_tickers = load_cached_tickers()
+    if cached_tickers is not None:
+        return cached_tickers
 
     headers = {'User-Agent': 'Mozilla/5.0'}
     all_symbols = []
 
     # 1. Russell 1000
     try:
+        print("Fetching Russell 1000...")
         r_resp = requests.get("https://en.wikipedia.org/wiki/Russell_1000_Index", headers=headers)
-        r_df = pd.read_html(io.StringIO(r_resp.text))[2] # Usually index 2
-        all_symbols.extend(r_df['Symbol'].tolist())
+        r_resp.raise_for_status()
+        r_tables = pd.read_html(io.StringIO(r_resp.text))
+        for table in r_tables:
+            col = get_symbol_column(table)
+            if col:
+                all_symbols.extend(table[col].tolist())
+                break
     except Exception as e: print(f"Russell Error: {e}")
 
     # 2. TSX 60
     try:
+        print("Fetching TSX 60...")
         t_resp = requests.get("https://en.wikipedia.org/wiki/S%26P/TSX_60", headers=headers)
-        t_df = pd.read_html(io.StringIO(t_resp.text))[0]
-        tsx_list = [str(s).replace('.', '-') + ".TO" for s in t_df['Symbol'].tolist()]
-        all_symbols.extend(tsx_list)
+        t_resp.raise_for_status()
+        t_tables = pd.read_html(io.StringIO(t_resp.text))
+        for table in t_tables:
+            col = get_symbol_column(table)
+            if col:
+                tsx_list = [str(s).strip().replace('.', '-') + ".TO" for s in table[col].tolist()]
+                all_symbols.extend(tsx_list)
+                break
     except Exception as e: print(f"TSX Error: {e}")
 
-    all_symbols = list(set([s.strip() for s in all_symbols]))
+    # 3. Yahoo Trending
+    try:
+        print("Fetching Yahoo Trending...")
+        y_resp = requests.get("https://finance.yahoo.com/markets/stocks/trending/", headers=headers)
+        y_resp.raise_for_status()
+        soup = BeautifulSoup(y_resp.text, 'html.parser')
+        trending = [
+            el['data-symbol']
+            for el in soup.find_all(attrs={"data-symbol": True})
+            if not el['data-symbol'].isdigit()
+        ]
+        all_symbols.extend(trending)
+    except Exception as e:
+        print(f"Trending Error: {e}")
+
+    all_symbols = sorted(
+        set(
+            s.strip().upper()
+            for s in all_symbols
+            if isinstance(s, str) and s.strip() and " " not in s
+        )
+    )
+
+    if len(all_symbols) < min_expected_symbols:
+        raise RuntimeError(
+            f"Ticker fetch returned only {len(all_symbols)} symbols. Aborting to avoid training on an invalid universe."
+        )
+
     with open(cache_file, "w") as f:
         json.dump(all_symbols, f)
-    
+
     return all_symbols
 
 # ==============================
