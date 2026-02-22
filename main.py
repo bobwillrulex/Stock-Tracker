@@ -52,6 +52,33 @@ FEATURE_COLUMNS = [
 INPUT_SIZE = len(FEATURE_COLUMNS)
 
 
+def _normalize_ohlcv_dataframe(df):
+    """Return a copy of OHLCV data with flat, 1D columns.
+
+    yfinance can return multi-index columns (or single-column DataFrames when selecting
+    e.g. `df['Close']`). Downstream feature engineering expects each OHLCV field to be a
+    pandas Series, so we squeeze those to 1D here.
+    """
+    if df is None or len(df) == 0:
+        return df
+
+    frame = df.copy()
+
+    if isinstance(frame.columns, pd.MultiIndex):
+        if frame.columns.nlevels >= 2:
+            # Keep the OHLCV field level when available.
+            frame.columns = frame.columns.get_level_values(0)
+        else:
+            frame.columns = frame.columns.get_level_values(-1)
+
+    required_cols = ["Open", "High", "Low", "Close", "Volume"]
+    for col in required_cols:
+        if col in frame.columns and isinstance(frame[col], pd.DataFrame):
+            frame[col] = frame[col].iloc[:, 0]
+
+    return frame
+
+
 def get_ticker_metadata(ticker):
     """Fetch stock name and market cap for reporting."""
     try:
@@ -198,6 +225,12 @@ def get_tickers():
 # ==============================
 def process_dataframe(df, val_split=VAL_SPLIT):
     """Transforms raw OHLCV data into train/val tensors and prediction window."""
+    df = _normalize_ohlcv_dataframe(df)
+
+    required_cols = {"High", "Low", "Close", "Volume"}
+    if df is None or not required_cols.issubset(set(df.columns)):
+        return None, None, None, None, None
+
     if len(df) < 220:
         return None, None, None, None, None
 
