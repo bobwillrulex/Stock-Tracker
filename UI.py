@@ -11,6 +11,8 @@ import pandas as pd
 import main
 
 SIGNALS_CSV_PATH = "buy_signals.csv"
+MACD_SIGNALS_CSV_PATH = "macd_signals.csv"
+RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
 TV_LAYOUT_ID = "ClEM8BLT"
 
 
@@ -44,8 +46,7 @@ def format_mcap(value):
     return f"${n:.0f}"
 
 
-def load_signals_from_csv(path=SIGNALS_CSV_PATH):
-    """Load and normalize signal rows from CSV."""
+def _load_csv_rows(path, expected_cols):
     if not os.path.exists(path):
         return []
 
@@ -53,94 +54,86 @@ def load_signals_from_csv(path=SIGNALS_CSV_PATH):
     if df.empty:
         return []
 
-    expected_cols = ["percentage", "confidence", "stock_name", "ticker", "marketcap"]
     for col in expected_cols:
         if col not in df.columns:
             df[col] = ""
 
-    df["marketcap"] = pd.to_numeric(df["marketcap"], errors="coerce").fillna(0)
-    df["percentage"] = pd.to_numeric(df["percentage"], errors="coerce").fillna(0)
-    df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce").fillna(0)
-    df = df.sort_values(by="marketcap", ascending=False)
+    if "marketcap" in df.columns:
+        df["marketcap"] = pd.to_numeric(df["marketcap"], errors="coerce").fillna(0)
+        df = df.sort_values(by="marketcap", ascending=False)
 
     return df.to_dict("records")
 
 
+def load_ai_rows(path=SIGNALS_CSV_PATH):
+    rows = _load_csv_rows(path, ["percentage", "confidence", "stock_name", "ticker", "marketcap"])
+    for row in rows:
+        row["percentage"] = float(pd.to_numeric(row.get("percentage", 0), errors="coerce") or 0)
+        row["confidence"] = float(pd.to_numeric(row.get("confidence", 0), errors="coerce") or 0)
+    return rows
+
+
+def load_macd_rows(path=MACD_SIGNALS_CSV_PATH):
+    rows = _load_csv_rows(path, ["signal_type", "stock_name", "ticker", "price", "change_pct", "marketcap"])
+    for row in rows:
+        row["signal_type"] = int(pd.to_numeric(row.get("signal_type", 0), errors="coerce") or 0)
+        row["price"] = float(pd.to_numeric(row.get("price", 0), errors="coerce") or 0)
+        row["change_pct"] = float(pd.to_numeric(row.get("change_pct", 0), errors="coerce") or 0)
+    return rows
+
+
+def load_rsi_rows(path=RSI_SIGNALS_CSV_PATH):
+    rows = _load_csv_rows(path, ["signal_type", "stock_name", "ticker", "rsi", "marketcap"])
+    for row in rows:
+        row["signal_type"] = int(pd.to_numeric(row.get("signal_type", 0), errors="coerce") or 0)
+        row["rsi"] = float(pd.to_numeric(row.get("rsi", 0), errors="coerce") or 0)
+    return rows
+
+
 def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     root = tk.Tk()
-    root.title("Buy Signals Viewer (CSV)")
-    root.geometry("900x600")
+    root.title("Signals Viewer (AI + MACD + RSI)")
+    root.geometry("1100x700")
 
-    title_label = tk.Label(
-        root,
-        text=f"Saved Buy Signals from {csv_path}",
-        font=("Arial", 13, "bold"),
-    )
+    title_label = tk.Label(root, text="Flat tabs: AI, MACD, and RSI", font=("Arial", 13, "bold"))
     title_label.pack(pady=8)
 
-    columns = ("percentage", "confidence", "stock_name", "ticker", "marketcap")
-    tree = ttk.Treeview(root, columns=columns, show='headings')
-    sort_state = {"column": None, "ascending": True}
-    table_rows = []
+    notebook = ttk.Notebook(root)
+    notebook.pack(expand=True, fill="both", padx=10, pady=6)
 
-    def sort_rows(rows, column, ascending):
-        numeric_columns = {"percentage", "confidence", "marketcap"}
-        if column in numeric_columns:
-            return sorted(rows, key=lambda row: float(row.get(column, 0) or 0), reverse=not ascending)
+    def build_tree_tab(tab_title, columns, headings, widths):
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text=tab_title)
+        tree = ttk.Treeview(frame, columns=columns, show="headings")
+        for col, heading, width in zip(columns, headings, widths):
+            tree.heading(col, text=heading)
+            tree.column(col, width=width, anchor="center" if col in {"ticker", "percentage", "confidence", "signal_type", "price", "change_pct", "rsi"} else "w")
+        tree.pack(expand=True, fill="both")
+        return tree
 
-        return sorted(
-            rows,
-            key=lambda row: str(row.get(column, "") or "").lower(),
-            reverse=not ascending,
-        )
+    ai_columns = ("percentage", "confidence", "stock_name", "ticker", "marketcap")
+    ai_tree = build_tree_tab(
+        "🤖 AI Signals",
+        ai_columns,
+        ("Predicted %", "Confidence", "Stock", "Ticker", "Market Cap"),
+        (120, 110, 320, 120, 160),
+    )
 
-    def render_rows(rows):
-        for item_id in tree.get_children():
-            tree.delete(item_id)
+    macd_columns = ("signal_type", "stock_name", "ticker", "price", "change_pct", "marketcap")
+    macd_tree = build_tree_tab(
+        "📈 MACD (Flat)",
+        macd_columns,
+        ("Type", "Stock", "Ticker", "Price", "Change %", "Market Cap"),
+        (90, 280, 120, 110, 110, 160),
+    )
 
-        for row in rows:
-            percentage_text = f"{row.get('percentage', 0):.2f}%"
-            confidence_text = f"{row.get('confidence', 0):.2f}%"
-            tree.insert(
-                '',
-                'end',
-                values=(
-                    percentage_text,
-                    confidence_text,
-                    row.get('stock_name', ''),
-                    row.get('ticker', ''),
-                    format_mcap(row.get('marketcap', 0)),
-                ),
-            )
-
-    def apply_sort_and_render():
-        rows = list(table_rows)
-        if sort_state["column"]:
-            rows = sort_rows(rows, sort_state["column"], sort_state["ascending"])
-        render_rows(rows)
-
-    def on_heading_click(column):
-        if sort_state["column"] == column:
-            sort_state["ascending"] = not sort_state["ascending"]
-        else:
-            sort_state["column"] = column
-            sort_state["ascending"] = True
-
-        apply_sort_and_render()
-
-    tree.heading("percentage", text="Predicted %", command=lambda: on_heading_click("percentage"))
-    tree.heading("confidence", text="Confidence", command=lambda: on_heading_click("confidence"))
-    tree.heading("stock_name", text="Stock", command=lambda: on_heading_click("stock_name"))
-    tree.heading("ticker", text="Ticker", command=lambda: on_heading_click("ticker"))
-    tree.heading("marketcap", text="Market Cap", command=lambda: on_heading_click("marketcap"))
-
-    tree.column("percentage", width=120, anchor="center")
-    tree.column("confidence", width=110, anchor="center")
-    tree.column("stock_name", width=250)
-    tree.column("ticker", width=120, anchor="center")
-    tree.column("marketcap", width=160, anchor="e")
-
-    tree.pack(expand=True, fill='both', padx=10, pady=10)
+    rsi_columns = ("signal_type", "stock_name", "ticker", "rsi", "marketcap")
+    rsi_tree = build_tree_tab(
+        "🆘 RSI (Flat)",
+        rsi_columns,
+        ("Type", "Stock", "Ticker", "RSI", "Market Cap"),
+        (90, 330, 120, 110, 160),
+    )
 
     status_var = tk.StringVar(value="")
     status_label = tk.Label(root, textvariable=status_var, fg="blue")
@@ -152,13 +145,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     task_in_progress = {"value": False}
     progress_queue = queue.Queue()
 
-    progress_bar = ttk.Progressbar(
-        root,
-        orient="horizontal",
-        mode="determinate",
-        length=600,
-        variable=progress_value,
-    )
+    progress_bar = ttk.Progressbar(root, orient="horizontal", mode="determinate", length=700, variable=progress_value)
     progress_bar.pack(padx=10, pady=6, fill="x")
 
     train_status_label = tk.Label(root, textvariable=train_status_var, fg="green")
@@ -167,40 +154,82 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     eta_label = tk.Label(root, textvariable=eta_var, fg="gray")
     eta_label.pack(pady=2)
 
-    def populate_table():
-        nonlocal table_rows
-        rows = load_signals_from_csv(csv_path)
-        if not rows:
-            table_rows = []
-            render_rows(table_rows)
-            status_var.set("No saved signals found. Run the scanner to generate buy_signals.csv.")
-            return
+    def _bind_open_chart(tree, ticker_index):
+        def on_double_click(event):
+            item_id = tree.identify_row(event.y)
+            if not item_id:
+                return
+            values = tree.item(item_id).get("values", [])
+            if len(values) > ticker_index and values[ticker_index]:
+                open_tradingview(values[ticker_index])
 
-        table_rows = rows
-        apply_sort_and_render()
+        tree.bind("<Double-1>", on_double_click)
 
-        status_var.set(f"Loaded {len(rows)} signals. Double-click a row to open TradingView.")
+    _bind_open_chart(ai_tree, 3)
+    _bind_open_chart(macd_tree, 2)
+    _bind_open_chart(rsi_tree, 2)
 
-    def on_double_click(event):
-        item_id = tree.identify_row(event.y)
-        if not item_id:
-            return
+    def render_ai(rows):
+        for item_id in ai_tree.get_children():
+            ai_tree.delete(item_id)
+        for row in rows:
+            ai_tree.insert(
+                "",
+                "end",
+                values=(
+                    f"{row.get('percentage', 0):.2f}%",
+                    f"{row.get('confidence', 0):.2f}%",
+                    row.get("stock_name", ""),
+                    row.get("ticker", ""),
+                    format_mcap(row.get("marketcap", 0)),
+                ),
+            )
 
-        values = tree.item(item_id).get("values", [])
-        if len(values) < 4:
-            return
+    def render_macd(rows):
+        for item_id in macd_tree.get_children():
+            macd_tree.delete(item_id)
+        for row in rows:
+            macd_tree.insert(
+                "",
+                "end",
+                values=(
+                    row.get("signal_type", ""),
+                    row.get("stock_name", ""),
+                    row.get("ticker", ""),
+                    f"{row.get('price', 0):.2f}",
+                    f"{row.get('change_pct', 0):.2f}%",
+                    format_mcap(row.get("marketcap", 0)),
+                ),
+            )
 
-        ticker = values[3]
-        if ticker:
-            open_tradingview(ticker)
+    def render_rsi(rows):
+        for item_id in rsi_tree.get_children():
+            rsi_tree.delete(item_id)
+        for row in rows:
+            rsi_tree.insert(
+                "",
+                "end",
+                values=(
+                    row.get("signal_type", ""),
+                    row.get("stock_name", ""),
+                    row.get("ticker", ""),
+                    f"{row.get('rsi', 0):.2f}",
+                    format_mcap(row.get("marketcap", 0)),
+                ),
+            )
 
-    tree.bind("<Double-1>", on_double_click)
+    def populate_tables():
+        ai_rows = load_ai_rows(csv_path)
+        macd_rows = load_macd_rows()
+        rsi_rows = load_rsi_rows()
 
-    button_frame = tk.Frame(root)
-    button_frame.pack(pady=6)
+        render_ai(ai_rows)
+        render_macd(macd_rows)
+        render_rsi(rsi_rows)
 
-    refresh_btn = tk.Button(button_frame, text="Refresh from CSV", command=populate_table)
-    refresh_btn.pack(side="left", padx=5)
+        status_var.set(
+            f"Loaded AI={len(ai_rows)}, MACD={len(macd_rows)}, RSI={len(rsi_rows)}. Double-click any row to open TradingView."
+        )
 
     def estimate_eta_seconds(event, stage_start_times):
         stage = event.get("stage", "")
@@ -233,7 +262,6 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             total = max(event.get("total", 1), 1)
             message = event.get("message", "")
 
-            # Map stage progress into global 0-100 progress bar
             if stage == "download":
                 mapped_progress = 5
             elif stage == "prepare":
@@ -264,6 +292,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 train_btn.config(state="normal")
                 run_scan_btn.config(state="normal")
                 refresh_btn.config(state="normal")
+                populate_tables()
 
         if task_in_progress["value"] or processed_any:
             root.after(250, handle_progress_updates)
@@ -287,19 +316,9 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             try:
                 tickers = main.get_tickers()
                 main.train_global_model(tickers, progress_callback=progress_queue.put)
-                progress_queue.put({
-                    "stage": "done",
-                    "current": 1,
-                    "total": 1,
-                    "message": "Global model training complete.",
-                })
+                progress_queue.put({"stage": "done", "current": 1, "total": 1, "message": "Global model training complete."})
             except Exception as exc:
-                progress_queue.put({
-                    "stage": "done",
-                    "current": 1,
-                    "total": 1,
-                    "message": f"Training failed: {exc}",
-                })
+                progress_queue.put({"stage": "done", "current": 1, "total": 1, "message": f"Training failed: {exc}"})
 
         threading.Thread(target=worker, daemon=True).start()
         handle_progress_updates()
@@ -321,22 +340,18 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             try:
                 tickers = main.get_tickers()
                 main.run_daily(tickers=tickers, progress_callback=progress_queue.put)
-                progress_queue.put({
-                    "stage": "done",
-                    "current": 1,
-                    "total": 1,
-                    "message": "Manual daily scan complete. Buy signals CSV updated.",
-                })
+                progress_queue.put({"stage": "done", "current": 1, "total": 1, "message": "Manual daily scan complete. CSV files updated."})
             except Exception as exc:
-                progress_queue.put({
-                    "stage": "done",
-                    "current": 1,
-                    "total": 1,
-                    "message": f"Manual scan failed: {exc}",
-                })
+                progress_queue.put({"stage": "done", "current": 1, "total": 1, "message": f"Manual scan failed: {exc}"})
 
         threading.Thread(target=worker, daemon=True).start()
         handle_progress_updates()
+
+    button_frame = tk.Frame(root)
+    button_frame.pack(pady=6)
+
+    refresh_btn = tk.Button(button_frame, text="Refresh CSV Tabs", command=populate_tables)
+    refresh_btn.pack(side="left", padx=5)
 
     train_btn = tk.Button(button_frame, text="Train Global Model", command=start_global_training)
     train_btn.pack(side="left", padx=5)
@@ -349,12 +364,12 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
     hint = tk.Label(
         root,
-        text="Tip: You can close and reopen this UI anytime; it reads persisted CSV data.",
+        text="Tip: Daily scan now writes AI (buy_signals.csv), MACD (macd_signals.csv), and RSI (rsi_signals.csv).",
         fg="gray",
     )
     hint.pack(pady=6)
 
-    populate_table()
+    populate_tables()
     root.mainloop()
 
 
