@@ -29,6 +29,8 @@ RUN_HOUR = 16             # 4 PM
 RUN_MINUTE = 2            # 4:02 PM
 WEEKLY_STATE = "weekly_state.json"
 SIGNALS_CSV_PATH = "buy_signals.csv"
+MACD_SIGNALS_CSV_PATH = "macd_signals.csv"
+RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 print(f"Using device: {DEVICE}")
@@ -118,6 +120,91 @@ def write_buy_signals_csv(signals, path=SIGNALS_CSV_PATH):
     report_df = pd.DataFrame(rows).sort_values(by="marketcap", ascending=False)
     report_df.to_csv(path, index=False)
     print(f"Wrote {len(report_df)} buy signals to {path} (sorted by market cap).")
+
+
+def classify_macd_signal(close_series):
+    """Return MACD signal category for the latest bar.
+
+    1 = just crossed above 0
+    2 = two bars above 0 after crossing
+    3 = below 0 but rounding upward
+    0 = no signal
+    """
+    if close_series is None or len(close_series) < 30:
+        return 0
+
+    ema_fast = close_series.ewm(span=12, adjust=False).mean()
+    ema_slow = close_series.ewm(span=26, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    macd_signal = macd_line.ewm(span=9, adjust=False).mean()
+    hist = macd_line - macd_signal
+
+    if len(hist) < 4:
+        return 0
+
+    t0 = float(hist.iloc[-1])
+    t1 = float(hist.iloc[-2])
+    t2 = float(hist.iloc[-3])
+
+    if t1 < 0 < t0:
+        return 1
+    if t2 < 0 and t1 > 0 and t0 > 0:
+        return 2
+    if -0.10 < t0 < 0 and t0 > t1:
+        return 3
+    return 0
+
+
+def classify_rsi_signal(close_series, period=14):
+    """Return RSI signal category for the latest bar.
+
+    1 = oversold (<30)
+    2 = almost oversold (30-35 and falling)
+    3 = recovering (was <30, now >=30)
+    0 = no signal
+    """
+    if close_series is None or len(close_series) < period + 2:
+        return 0, None
+
+    delta = close_series.diff()
+    gain = delta.clip(lower=0).rolling(window=period).mean()
+    loss = (-delta.clip(upper=0)).rolling(window=period).mean()
+    rs = gain / loss.replace(0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
+
+    if len(rsi.dropna()) < 2:
+        return 0, None
+
+    current_rsi = float(rsi.iloc[-1])
+    prev_rsi = float(rsi.iloc[-2])
+
+    if current_rsi < 30:
+        return 1, current_rsi
+    if 30 <= current_rsi <= 35 and current_rsi < prev_rsi:
+        return 2, current_rsi
+    if prev_rsi < 30 <= current_rsi:
+        return 3, current_rsi
+    return 0, current_rsi
+
+
+def write_technical_signals_csv(macd_signals, rsi_signals):
+    """Persist flat MACD/RSI technical signal lists for UI tabs."""
+    macd_cols = ["signal_type", "stock_name", "ticker", "price", "change_pct", "marketcap"]
+    rsi_cols = ["signal_type", "stock_name", "ticker", "rsi", "marketcap"]
+
+    macd_df = pd.DataFrame(macd_signals, columns=macd_cols)
+    rsi_df = pd.DataFrame(rsi_signals, columns=rsi_cols)
+
+    if not macd_df.empty:
+        macd_df = macd_df.sort_values(by="marketcap", ascending=False)
+    if not rsi_df.empty:
+        rsi_df = rsi_df.sort_values(by="marketcap", ascending=False)
+
+    macd_df.to_csv(MACD_SIGNALS_CSV_PATH, index=False)
+    rsi_df.to_csv(RSI_SIGNALS_CSV_PATH, index=False)
+
+    print(f"Wrote {len(macd_df)} MACD signals to {MACD_SIGNALS_CSV_PATH}.")
+    print(f"Wrote {len(rsi_df)} RSI signals to {RSI_SIGNALS_CSV_PATH}.")
 
 
 def compute_confidence_score(model, X_val, y_val, pred):
@@ -545,6 +632,8 @@ def run_daily(tickers=None, progress_callback=None):
     print("Running daily scan...")
     emit_progress("scan", 0, total_tickers, "Starting daily scan...")
     buy_signals = []
+    macd_signals = []
+    rsi_signals = []
 
     # Save clean global weights once
     base_state = {k: v.clone() for k, v in model.state_dict().items()}
@@ -600,12 +689,46 @@ def run_daily(tickers=None, progress_callback=None):
                     }
                 )
 
+        close_series = ticker_df.get("Close")
+        if close_series is not None and len(close_series) > 30:
+            macd_type = classify_macd_signal(close_series)
+            rsi_type, rsi_value = classify_rsi_signal(close_series)
+
+            if macd_type in (1, 2, 3):
+                metadata = get_ticker_metadata(t)
+                close_today = float(close_series.iloc[-1])
+                close_prev = float(close_series.iloc[-2])
+                change_pct = ((close_today - close_prev) / close_prev) * 100 if close_prev else 0.0
+                macd_signals.append(
+                    {
+                        "signal_type": macd_type,
+                        "stock_name": metadata["stock_name"],
+                        "ticker": t,
+                        "price": round(close_today, 2),
+                        "change_pct": round(change_pct, 2),
+                        "marketcap": metadata["marketcap"],
+                    }
+                )
+
+            if rsi_type in (1, 2, 3):
+                metadata = get_ticker_metadata(t)
+                rsi_signals.append(
+                    {
+                        "signal_type": rsi_type,
+                        "stock_name": metadata["stock_name"],
+                        "ticker": t,
+                        "rsi": round(float(rsi_value), 2) if rsi_value is not None else 0.0,
+                        "marketcap": metadata["marketcap"],
+                    }
+                )
+
         time.sleep(0.1)
         processed += 1
         emit_progress("scan", processed, total_tickers, f"Daily scan: {processed}/{total_tickers} ({t})")
 
     torch.save(base_state, MODEL_PATH)
     write_buy_signals_csv(buy_signals)
+    write_technical_signals_csv(macd_signals, rsi_signals)
     save_state(None)
     print("Daily run complete.")
 
