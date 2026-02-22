@@ -164,13 +164,24 @@ def process_dataframe(df):
 # ==============================
 # 2. BATCHED GLOBAL TRAINING
 # ==============================
-def train_global_model(tickers):
+def train_global_model(tickers, progress_callback=None):
+    def emit_progress(stage, current, total, message):
+        if progress_callback:
+            progress_callback({
+                "stage": stage,
+                "current": current,
+                "total": total,
+                "message": message,
+            })
+
+    emit_progress("download", 0, max(len(tickers), 1), "Downloading historical data...")
     print(f"Downloading data for {len(tickers)} symbols...")
     # Bulk download is 10x faster than looping yf.Ticker
     raw_data = yf.download(tickers, period="2y", group_by='ticker', threads=True)
     
     all_X, all_y = [], []
-    for t in tickers:
+    total_tickers = len(tickers)
+    for idx, t in enumerate(tickers, start=1):
         try:
             ticker_df = raw_data[t] if len(tickers) > 1 else raw_data
             X, y, _ = process_dataframe(ticker_df)
@@ -178,6 +189,7 @@ def train_global_model(tickers):
                 all_X.append(X)
                 all_y.append(y)
         except Exception: continue
+        emit_progress("prepare", idx, max(total_tickers, 1), f"Preparing training set ({idx}/{total_tickers}): {t}")
 
     if len(all_X) == 0:
         raise RuntimeError("No valid training data found.")
@@ -192,8 +204,9 @@ def train_global_model(tickers):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     loss_fn = nn.MSELoss()
 
+    epochs = 3
     print("Training Global Model...")
-    for epoch in range(3):
+    for epoch in range(epochs):
         for batch_X, batch_y in loader:
             batch_X = batch_X.to(DEVICE)
             batch_y = batch_y.to(DEVICE)
@@ -202,7 +215,9 @@ def train_global_model(tickers):
             loss = loss_fn(model(batch_X), batch_y)
             loss.backward()
             optimizer.step()
+        emit_progress("train", epoch + 1, epochs, f"Training epoch {epoch + 1}/{epochs}")
     torch.save(model.state_dict(), MODEL_PATH)
+    emit_progress("done", 1, 1, "Global model training complete.")
     return model
 
 
