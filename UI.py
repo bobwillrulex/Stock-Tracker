@@ -99,7 +99,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     train_status_var = tk.StringVar(value="")
     eta_var = tk.StringVar(value="Estimated time left: --")
     progress_value = tk.DoubleVar(value=0.0)
-    train_in_progress = {"value": False}
+    task_in_progress = {"value": False}
     progress_queue = queue.Queue()
 
     progress_bar = ttk.Progressbar(
@@ -218,24 +218,26 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 eta_var.set(f"Estimated time left: {minutes}m {seconds}s")
 
             if stage == "done":
-                train_in_progress["value"] = False
+                task_in_progress["value"] = False
                 train_btn.config(state="normal")
+                run_scan_btn.config(state="normal")
                 refresh_btn.config(state="normal")
 
-        if train_in_progress["value"] or processed_any:
+        if task_in_progress["value"] or processed_any:
             root.after(250, handle_progress_updates)
 
     handle_progress_updates.stage_start_times = {}
 
     def start_global_training():
-        if train_in_progress["value"]:
+        if task_in_progress["value"]:
             return
 
-        train_in_progress["value"] = True
+        task_in_progress["value"] = True
         progress_value.set(0)
         train_status_var.set("Starting global model training...")
         eta_var.set("Estimated time left: calculating...")
         train_btn.config(state="disabled")
+        run_scan_btn.config(state="disabled")
         refresh_btn.config(state="disabled")
         handle_progress_updates.stage_start_times = {}
 
@@ -260,8 +262,45 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         threading.Thread(target=worker, daemon=True).start()
         handle_progress_updates()
 
+    def start_manual_scan():
+        if task_in_progress["value"]:
+            return
+
+        task_in_progress["value"] = True
+        progress_value.set(0)
+        train_status_var.set("Starting manual daily scan...")
+        eta_var.set("Estimated time left: this run can take a few minutes")
+        train_btn.config(state="disabled")
+        run_scan_btn.config(state="disabled")
+        refresh_btn.config(state="disabled")
+        handle_progress_updates.stage_start_times = {}
+
+        def worker():
+            try:
+                tickers = main.get_tickers()
+                main.run_daily(tickers=tickers)
+                progress_queue.put({
+                    "stage": "done",
+                    "current": 1,
+                    "total": 1,
+                    "message": "Manual daily scan complete. Buy signals CSV updated.",
+                })
+            except Exception as exc:
+                progress_queue.put({
+                    "stage": "done",
+                    "current": 1,
+                    "total": 1,
+                    "message": f"Manual scan failed: {exc}",
+                })
+
+        threading.Thread(target=worker, daemon=True).start()
+        handle_progress_updates()
+
     train_btn = tk.Button(button_frame, text="Train Global Model", command=start_global_training)
     train_btn.pack(side="left", padx=5)
+
+    run_scan_btn = tk.Button(button_frame, text="Run Daily Scan Now", command=start_manual_scan)
+    run_scan_btn.pack(side="left", padx=5)
 
     close_btn = tk.Button(button_frame, text="Close", command=root.destroy)
     close_btn.pack(side="left", padx=5)

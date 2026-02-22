@@ -448,15 +448,17 @@ def save_state(ticker):
 # ==============================
 # DAILY RUN
 # ==============================
-def run_daily():
-    # Use the global TICKERS list
+def run_daily(tickers=None):
+    if tickers is None:
+        tickers = globals().get("TICKERS") or get_tickers()
+
     checkpoint = BEST_MODEL_PATH if os.path.exists(BEST_MODEL_PATH) else MODEL_PATH
     if os.path.exists(checkpoint):
         model = PatternScannerLSTM(input_size=INPUT_SIZE).to(DEVICE)
         model.load_state_dict(torch.load(checkpoint, map_location=DEVICE))
         print(f"Loaded global model from {checkpoint}.")
     else:
-        model = train_global_model(TICKERS)
+        model = train_global_model(tickers)
 
     loss_fn = nn.MSELoss()
     state = load_state()
@@ -470,7 +472,7 @@ def run_daily():
     # Save clean global weights once
     base_state = {k: v.clone() for k, v in model.state_dict().items()}
 
-    for t in TICKERS:
+    for t in tickers:
         if skipping:
             if t == resume:
                 skipping = False
