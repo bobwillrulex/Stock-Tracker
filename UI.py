@@ -53,13 +53,14 @@ def load_signals_from_csv(path=SIGNALS_CSV_PATH):
     if df.empty:
         return []
 
-    expected_cols = ["percentage", "stock_name", "ticker", "marketcap"]
+    expected_cols = ["percentage", "confidence", "stock_name", "ticker", "marketcap"]
     for col in expected_cols:
         if col not in df.columns:
             df[col] = ""
 
     df["marketcap"] = pd.to_numeric(df["marketcap"], errors="coerce").fillna(0)
     df["percentage"] = pd.to_numeric(df["percentage"], errors="coerce").fillna(0)
+    df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce").fillna(0)
     df = df.sort_values(by="marketcap", ascending=False)
 
     return df.to_dict("records")
@@ -77,16 +78,18 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     )
     title_label.pack(pady=8)
 
-    columns = ("percentage", "stock_name", "ticker", "marketcap")
+    columns = ("percentage", "confidence", "stock_name", "ticker", "marketcap")
     tree = ttk.Treeview(root, columns=columns, show='headings')
 
     tree.heading("percentage", text="Predicted %")
+    tree.heading("confidence", text="Confidence")
     tree.heading("stock_name", text="Stock")
     tree.heading("ticker", text="Ticker")
     tree.heading("marketcap", text="Market Cap")
 
     tree.column("percentage", width=120, anchor="center")
-    tree.column("stock_name", width=300)
+    tree.column("confidence", width=110, anchor="center")
+    tree.column("stock_name", width=250)
     tree.column("ticker", width=120, anchor="center")
     tree.column("marketcap", width=160, anchor="e")
 
@@ -128,11 +131,13 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
         for row in rows:
             percentage_text = f"{row.get('percentage', 0):.2f}%"
+            confidence_text = f"{row.get('confidence', 0):.2f}%"
             tree.insert(
                 '',
                 'end',
                 values=(
                     percentage_text,
+                    confidence_text,
                     row.get('stock_name', ''),
                     row.get('ticker', ''),
                     format_mcap(row.get('marketcap', 0)),
@@ -147,10 +152,10 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             return
 
         values = tree.item(item_id).get("values", [])
-        if len(values) < 3:
+        if len(values) < 4:
             return
 
-        ticker = values[2]
+        ticker = values[3]
         if ticker:
             open_tradingview(ticker)
 

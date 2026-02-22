@@ -100,7 +100,7 @@ def get_ticker_metadata(ticker):
 def write_buy_signals_csv(signals, path=SIGNALS_CSV_PATH):
     """Write buy signals sorted by market cap to CSV."""
     if not signals:
-        pd.DataFrame(columns=["percentage", "stock_name", "ticker", "marketcap"]).to_csv(path, index=False)
+        pd.DataFrame(columns=["percentage", "confidence", "stock_name", "ticker", "marketcap"]).to_csv(path, index=False)
         print(f"No buy signals found. Wrote empty CSV to {path}.")
         return
 
@@ -109,6 +109,7 @@ def write_buy_signals_csv(signals, path=SIGNALS_CSV_PATH):
         metadata = get_ticker_metadata(signal["ticker"])
         rows.append({
             "percentage": round(signal["predicted_return"] * 100, 2),
+            "confidence": round(signal.get("confidence", 0.0) * 100, 2),
             "stock_name": metadata["stock_name"],
             "ticker": metadata["ticker"],
             "marketcap": metadata["marketcap"],
@@ -117,6 +118,27 @@ def write_buy_signals_csv(signals, path=SIGNALS_CSV_PATH):
     report_df = pd.DataFrame(rows).sort_values(by="marketcap", ascending=False)
     report_df.to_csv(path, index=False)
     print(f"Wrote {len(report_df)} buy signals to {path} (sorted by market cap).")
+
+
+def compute_confidence_score(model, X_val, y_val, pred):
+    """Estimate model confidence (0-1) using recent validation MAE + signal strength.
+
+    Lower validation error and stronger positive predicted return both increase confidence.
+    """
+    if X_val is None or y_val is None or len(X_val) == 0:
+        return 0.0
+
+    model.eval()
+    with torch.no_grad():
+        val_pred = model(X_val.to(DEVICE))
+        mae = torch.mean(torch.abs(val_pred - y_val.to(DEVICE))).item()
+
+    # MAE in return-space is usually small; map to 0-1 with a conservative decay.
+    base_confidence = float(np.exp(-mae / 0.03))
+    # Reward stronger expected upside, capped at +10% return.
+    strength_bonus = min(max(pred, 0.0), 0.10) / 0.10
+    confidence = 0.75 * base_confidence + 0.25 * strength_bonus
+    return float(np.clip(confidence, 0.0, 1.0))
 
 def get_tickers():
     cache_file = "tickers_cache.json"
@@ -540,7 +562,7 @@ def run_daily(tickers=None, progress_callback=None):
 
         try:
             ticker_df = yf.download(t, period="2y", progress=False)
-            X_train, y_train, _, _, X_pred = process_dataframe(ticker_df, val_split=0.1)
+            X_train, y_train, X_val, y_val, X_pred = process_dataframe(ticker_df, val_split=0.1)
         except Exception as e:
             print(f"Error fetching {t}: {e}")
             processed += 1
@@ -568,8 +590,15 @@ def run_daily(tickers=None, progress_callback=None):
         with torch.no_grad():
             pred = model(X_pred.unsqueeze(0)).item()
             if pred > 0.02:
+                confidence = compute_confidence_score(model, X_val, y_val, pred)
                 print(f"--- BUY SIGNAL: {t} | Expected 5D Return: {pred*100:.2f}% ---")
-                buy_signals.append({"ticker": t, "predicted_return": pred})
+                buy_signals.append(
+                    {
+                        "ticker": t,
+                        "predicted_return": pred,
+                        "confidence": confidence,
+                    }
+                )
 
         time.sleep(0.1)
         processed += 1
