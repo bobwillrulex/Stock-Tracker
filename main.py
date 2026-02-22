@@ -20,8 +20,9 @@ from torch.utils.data import DataLoader, TensorDataset
 # ==============================
 # CONFIG & CONSTANTS
 # ==============================
-WINDOW_SIZE = 20          # Model looks at the last 20 trading days
+WINDOW_SIZE = 60          # Model looks at the last 60 trading days
 MODEL_PATH = "stock_model.pth" 
+BEST_MODEL_PATH = "stock_model_best.pth"
 STATE_PATH = "run_state.json"
 RUN_HOUR = 16             # 4 PM
 RUN_MINUTE = 2            # 4:02 PM
@@ -35,7 +36,20 @@ print(f"Using device: {DEVICE}")
 BATCH_SIZE = 64
 LR_GLOBAL = 0.001
 LR_FINE_TUNE = 0.0001
-INPUT_SIZE = 6  # Matches your features list: Log_Ret, RSI, ATR, EMA20, EMA50, Vol_Change
+GLOBAL_EPOCHS = 30
+WEEKLY_EPOCHS = 8
+PATIENCE = 5
+WEIGHT_DECAY = 1e-5
+GRAD_CLIP = 1.0
+VAL_SPLIT = 0.2
+
+FEATURE_COLUMNS = [
+    'Log_Ret', 'RSI', 'ATR', 'EMA20', 'EMA50', 'Vol_Change',
+    'MACD', 'MACD_SIGNAL', 'MACD_HIST',
+    'Support_20', 'Resistance_20',
+    'Fib_236', 'Fib_382', 'Fib_500', 'Fib_618',
+]
+INPUT_SIZE = len(FEATURE_COLUMNS)
 
 
 def get_ticker_metadata(ticker):
@@ -182,10 +196,10 @@ def get_tickers():
 # ==============================
 # 1. IMPROVED DATA PROCESSING (No Leakage)
 # ==============================
-def process_dataframe(df):
-    """Transforms raw OHLCV data into scaled tensors."""
-    if len(df) < 150:
-        return None, None, None
+def process_dataframe(df, val_split=VAL_SPLIT):
+    """Transforms raw OHLCV data into train/val tensors and prediction window."""
+    if len(df) < 220:
+        return None, None, None, None, None
 
     # Technical Indicators
     close_delta = df['Close'].diff()
@@ -206,10 +220,31 @@ def process_dataframe(df):
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['Log_Ret'] = np.log(df['Close'] / df['Close'].shift(1))
     df['Vol_Change'] = df['Volume'].pct_change()
+
+    # MACD family (12, 26, 9)
+    ema_fast = df['Close'].ewm(span=12, adjust=False).mean()
+    ema_slow = df['Close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = ema_fast - ema_slow
+    df['MACD_SIGNAL'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    df['MACD_HIST'] = df['MACD'] - df['MACD_SIGNAL']
+
+    # Dynamic support/resistance using rolling lows/highs
+    rolling_low = df['Low'].rolling(window=20, min_periods=20).min()
+    rolling_high = df['High'].rolling(window=20, min_periods=20).max()
+    df['Support_20'] = (df['Close'] - rolling_low) / df['Close']
+    df['Resistance_20'] = (rolling_high - df['Close']) / df['Close']
+
+    # Fibonacci retracement ratios from rolling swing range
+    swing_range = (rolling_high - rolling_low).replace(0, np.nan)
+    df['Fib_236'] = (df['Close'] - (rolling_high - swing_range * 0.236)) / df['Close']
+    df['Fib_382'] = (df['Close'] - (rolling_high - swing_range * 0.382)) / df['Close']
+    df['Fib_500'] = (df['Close'] - (rolling_high - swing_range * 0.5)) / df['Close']
+    df['Fib_618'] = (df['Close'] - (rolling_high - swing_range * 0.618)) / df['Close']
+
     df['Target'] = df['Close'].shift(-5) / df['Close'] - 1
     
     df = df.replace([np.inf, -np.inf], np.nan).dropna()
-    features = ['Log_Ret', 'RSI', 'ATR', 'EMA20', 'EMA50', 'Vol_Change']
+    features = FEATURE_COLUMNS
 
     # Split before scaling to prevent leakage
     train_df = df.iloc[:-WINDOW_SIZE].copy()
@@ -224,11 +259,69 @@ def process_dataframe(df):
         X.append(X_train_raw[i-WINDOW_SIZE:i])
         y.append(train_df['Target'].iloc[i-1])
 
+    if len(X) < 30:
+        return None, None, None, None, None
+
+    split_idx = int(len(X) * (1 - val_split))
+    split_idx = max(split_idx, 1)
+    split_idx = min(split_idx, len(X) - 1)
+
+    X_train = torch.tensor(np.array(X[:split_idx]), dtype=torch.float32)
+    y_train = torch.tensor(np.array(y[:split_idx]), dtype=torch.float32).unsqueeze(1)
+    X_val = torch.tensor(np.array(X[split_idx:]), dtype=torch.float32)
+    y_val = torch.tensor(np.array(y[split_idx:]), dtype=torch.float32).unsqueeze(1)
+
     return (
-        torch.tensor(np.array(X), dtype=torch.float32),
-        torch.tensor(np.array(y), dtype=torch.float32).unsqueeze(1),
+        X_train,
+        y_train,
+        X_val,
+        y_val,
         torch.tensor(np.array(X_pred_raw), dtype=torch.float32)
     )
+
+
+def run_epoch(model, loader, optimizer, loss_fn, scaler=None):
+    model.train()
+    total_loss = 0.0
+    total_count = 0
+
+    for batch_X, batch_y in loader:
+        batch_X = batch_X.to(DEVICE)
+        batch_y = batch_y.to(DEVICE)
+        optimizer.zero_grad()
+
+        with torch.autocast(device_type=DEVICE.type, dtype=torch.float16, enabled=(DEVICE.type == "cuda")):
+            loss = loss_fn(model(batch_X), batch_y)
+
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
+            optimizer.step()
+
+        total_loss += loss.item() * len(batch_X)
+        total_count += len(batch_X)
+
+    return total_loss / max(total_count, 1)
+
+
+def evaluate(model, loader, loss_fn):
+    model.eval()
+    total_loss = 0.0
+    total_count = 0
+    with torch.no_grad():
+        for batch_X, batch_y in loader:
+            batch_X = batch_X.to(DEVICE)
+            batch_y = batch_y.to(DEVICE)
+            loss = loss_fn(model(batch_X), batch_y)
+            total_loss += loss.item() * len(batch_X)
+            total_count += len(batch_X)
+    return total_loss / max(total_count, 1)
 
 # ==============================
 # 2. BATCHED GLOBAL TRAINING
@@ -245,47 +338,69 @@ def train_global_model(tickers, progress_callback=None):
 
     emit_progress("download", 0, max(len(tickers), 1), "Downloading historical data...")
     print(f"Downloading data for {len(tickers)} symbols...")
-    # Bulk download is 10x faster than looping yf.Ticker
     raw_data = yf.download(tickers, period="2y", group_by='ticker', threads=True)
-    
-    all_X, all_y = [], []
+
+    train_X, train_y, val_X, val_y = [], [], [], []
     total_tickers = len(tickers)
     for idx, t in enumerate(tickers, start=1):
         try:
             ticker_df = raw_data[t] if len(tickers) > 1 else raw_data
-            X, y, _ = process_dataframe(ticker_df)
-            if X is not None:
-                all_X.append(X)
-                all_y.append(y)
-        except Exception: continue
+            X_train, y_train, X_val, y_val, _ = process_dataframe(ticker_df)
+            if X_train is not None:
+                train_X.append(X_train)
+                train_y.append(y_train)
+                val_X.append(X_val)
+                val_y.append(y_val)
+        except Exception:
+            continue
         emit_progress("prepare", idx, max(total_tickers, 1), f"Preparing training set ({idx}/{total_tickers}): {t}")
 
-    if len(all_X) == 0:
+    if len(train_X) == 0:
         raise RuntimeError("No valid training data found.")
 
-    X_total = torch.cat(all_X)
-    y_total = torch.cat(all_y)
-    
-    dataset = TensorDataset(X_total, y_total)
-    loader = DataLoader(dataset, batch_size=64, shuffle=True)
+    X_train_total = torch.cat(train_X)
+    y_train_total = torch.cat(train_y)
+    X_val_total = torch.cat(val_X)
+    y_val_total = torch.cat(val_y)
+
+    train_loader = DataLoader(TensorDataset(X_train_total, y_train_total), batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(TensorDataset(X_val_total, y_val_total), batch_size=BATCH_SIZE, shuffle=False)
 
     model = PatternScannerLSTM(input_size=INPUT_SIZE).to(DEVICE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LR_GLOBAL, weight_decay=WEIGHT_DECAY)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2)
     loss_fn = nn.MSELoss()
+    scaler = torch.amp.GradScaler(enabled=(DEVICE.type == "cuda"))
 
-    epochs = 3
     print("Training Global Model...")
-    for epoch in range(epochs):
-        for batch_X, batch_y in loader:
-            batch_X = batch_X.to(DEVICE)
-            batch_y = batch_y.to(DEVICE)
+    best_val = float('inf')
+    best_state = None
+    patience_counter = 0
 
-            optimizer.zero_grad()
-            loss = loss_fn(model(batch_X), batch_y)
-            loss.backward()
-            optimizer.step()
-        emit_progress("train", epoch + 1, epochs, f"Training epoch {epoch + 1}/{epochs}")
-    torch.save(model.state_dict(), MODEL_PATH)
+    for epoch in range(GLOBAL_EPOCHS):
+        train_loss = run_epoch(model, train_loader, optimizer, loss_fn, scaler=scaler)
+        val_loss = evaluate(model, val_loader, loss_fn)
+        scheduler.step(val_loss)
+
+        print(f"Epoch {epoch + 1:02d}/{GLOBAL_EPOCHS} - train_loss={train_loss:.6f} val_loss={val_loss:.6f}")
+        emit_progress("train", epoch + 1, GLOBAL_EPOCHS, f"Epoch {epoch + 1}/{GLOBAL_EPOCHS} train={train_loss:.6f} val={val_loss:.6f}")
+
+        if val_loss < best_val:
+            best_val = val_loss
+            patience_counter = 0
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            torch.save(best_state, BEST_MODEL_PATH)
+        else:
+            patience_counter += 1
+            if patience_counter >= PATIENCE:
+                print(f"Early stopping triggered at epoch {epoch + 1}.")
+                break
+
+    if best_state is None:
+        best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+
+    model.load_state_dict(best_state)
+    torch.save(best_state, MODEL_PATH)
     emit_progress("done", 1, 1, "Global model training complete.")
     return model
 
@@ -294,17 +409,26 @@ def train_global_model(tickers, progress_callback=None):
 # MODEL
 # ==============================
 class PatternScannerLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size=64, num_layers=2, dropout=0.3):
+    def __init__(self, input_size, hidden_size=128, num_layers=2, dropout=0.25):
         super().__init__()
         self.lstm = nn.LSTM(
             input_size, hidden_size, num_layers,
-            batch_first=True, dropout=dropout
+            batch_first=True, dropout=dropout, bidirectional=True
         )
-        self.fc = nn.Linear(hidden_size, 1)
+        self.attention = nn.Sequential(
+            nn.Linear(hidden_size * 2, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, 1)
+        )
+        self.norm = nn.LayerNorm(hidden_size * 2)
+        self.fc = nn.Linear(hidden_size * 2, 1)
 
     def forward(self, x):
         out, _ = self.lstm(x)
-        return self.fc(out[:, -1, :])
+        attn_scores = torch.softmax(self.attention(out), dim=1)
+        context = torch.sum(attn_scores * out, dim=1)
+        context = self.norm(context)
+        return self.fc(context)
 
 
 # ==============================
@@ -326,15 +450,14 @@ def save_state(ticker):
 # ==============================
 def run_daily():
     # Use the global TICKERS list
-    if os.path.exists(MODEL_PATH):
+    checkpoint = BEST_MODEL_PATH if os.path.exists(BEST_MODEL_PATH) else MODEL_PATH
+    if os.path.exists(checkpoint):
         model = PatternScannerLSTM(input_size=INPUT_SIZE).to(DEVICE)
-        model.load_state_dict(torch.load(MODEL_PATH))
-        print("Loaded global model.")
+        model.load_state_dict(torch.load(checkpoint, map_location=DEVICE))
+        print(f"Loaded global model from {checkpoint}.")
     else:
-        # FIX: Pass TICKERS to the training function
         model = train_global_model(TICKERS)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
     loss_fn = nn.MSELoss()
     state = load_state()
 
@@ -358,29 +481,24 @@ def run_daily():
 
         try:
             ticker_df = yf.download(t, period="2y", progress=False)
-            X, y, X_pred = process_dataframe(ticker_df)
+            X_train, y_train, _, _, X_pred = process_dataframe(ticker_df, val_split=0.1)
         except Exception as e:
             print(f"Error fetching {t}: {e}")
             continue
 
-        if X is None:
+        if X_train is None:
             continue
 
-        X = X.to(DEVICE)
-        y = y.to(DEVICE)
         X_pred = X_pred.to(DEVICE)
 
         # Reset model + optimizer
         model.load_state_dict(base_state)
-        optimizer = torch.optim.Adam(model.parameters(), lr=LR_FINE_TUNE)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=LR_FINE_TUNE, weight_decay=WEIGHT_DECAY)
 
-        # Fine-tune
-        model.train()
-        for _ in range(2):
-            optimizer.zero_grad()
-            loss = loss_fn(model(X), y)
-            loss.backward()
-            optimizer.step()
+        # Fine-tune with mini-batches
+        train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=32, shuffle=True)
+        for _ in range(3):
+            run_epoch(model, train_loader, optimizer, loss_fn, scaler=None)
 
         # Predict
         model.eval()
@@ -446,21 +564,20 @@ def save_weekly_state(week):
 def weekly_global_update(tickers, lookback_days=180):
     print("🔄 Weekly global model update (last 6 months)...")
 
-    if not os.path.exists(MODEL_PATH):
+    checkpoint = BEST_MODEL_PATH if os.path.exists(BEST_MODEL_PATH) else MODEL_PATH
+    if not os.path.exists(checkpoint):
         print("No existing model found — skipping weekly update.")
         return
 
-    # Load existing global model
     model = PatternScannerLSTM(input_size=INPUT_SIZE).to(DEVICE)
-    model.load_state_dict(torch.load(MODEL_PATH))
-    model.train()
+    model.load_state_dict(torch.load(checkpoint, map_location=DEVICE))
 
-    # 🔥 Small learning rate = gentle adaptation
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=LR_GLOBAL * 0.1,   # e.g. 1e-4
-        weight_decay=1e-5
+        lr=LR_FINE_TUNE,
+        weight_decay=WEIGHT_DECAY,
     )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2)
     loss_fn = nn.MSELoss()
 
     start_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
@@ -473,32 +590,49 @@ def weekly_global_update(tickers, lookback_days=180):
         progress=False
     )
 
-    all_X, all_y = [], []
+    train_X, train_y, val_X, val_y = [], [], [], []
 
     for t in tickers:
         try:
             df = raw_data[t] if len(tickers) > 1 else raw_data
-            X, y, _ = process_dataframe(df)
-            if X is not None:
-                all_X.append(X)
-                all_y.append(y)
+            X_train, y_train, X_val, y_val, _ = process_dataframe(df, val_split=0.15)
+            if X_train is not None:
+                train_X.append(X_train)
+                train_y.append(y_train)
+                val_X.append(X_val)
+                val_y.append(y_val)
         except Exception:
             continue
 
-    if not all_X:
+    if not train_X:
         print("⚠️ No valid data for weekly update.")
         return
 
-    X = torch.cat(all_X).to(DEVICE)
-    y = torch.cat(all_y).to(DEVICE)
+    train_loader = DataLoader(TensorDataset(torch.cat(train_X), torch.cat(train_y)), batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(TensorDataset(torch.cat(val_X), torch.cat(val_y)), batch_size=BATCH_SIZE, shuffle=False)
 
-    # 🔥 ONE epoch only
-    optimizer.zero_grad()
-    loss = loss_fn(model(X), y)
-    loss.backward()
-    optimizer.step()
+    best_val = float('inf')
+    best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+    patience_counter = 0
 
-    torch.save(model.state_dict(), MODEL_PATH)
+    for epoch in range(WEEKLY_EPOCHS):
+        train_loss = run_epoch(model, train_loader, optimizer, loss_fn, scaler=None)
+        val_loss = evaluate(model, val_loader, loss_fn)
+        scheduler.step(val_loss)
+        print(f"Weekly epoch {epoch + 1}/{WEEKLY_EPOCHS} - train_loss={train_loss:.6f} val_loss={val_loss:.6f}")
+
+        if val_loss < best_val:
+            best_val = val_loss
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= 3:
+                print("Weekly update early stopped.")
+                break
+
+    torch.save(best_state, BEST_MODEL_PATH)
+    torch.save(best_state, MODEL_PATH)
     print("✅ Weekly global update complete.")
 
 # ==============================
