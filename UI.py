@@ -1,9 +1,14 @@
 import os
+import queue
+import threading
+import time
 import webbrowser
 import tkinter as tk
 from tkinter import ttk
 
 import pandas as pd
+
+import main
 
 SIGNALS_CSV_PATH = "buy_signals.csv"
 TV_LAYOUT_ID = "ClEM8BLT"
@@ -91,6 +96,27 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     status_label = tk.Label(root, textvariable=status_var, fg="blue")
     status_label.pack(pady=4)
 
+    train_status_var = tk.StringVar(value="")
+    eta_var = tk.StringVar(value="Estimated time left: --")
+    progress_value = tk.DoubleVar(value=0.0)
+    train_in_progress = {"value": False}
+    progress_queue = queue.Queue()
+
+    progress_bar = ttk.Progressbar(
+        root,
+        orient="horizontal",
+        mode="determinate",
+        length=600,
+        variable=progress_value,
+    )
+    progress_bar.pack(padx=10, pady=6, fill="x")
+
+    train_status_label = tk.Label(root, textvariable=train_status_var, fg="green")
+    train_status_label.pack(pady=2)
+
+    eta_label = tk.Label(root, textvariable=eta_var, fg="gray")
+    eta_label.pack(pady=2)
+
     def populate_table():
         for item_id in tree.get_children():
             tree.delete(item_id)
@@ -135,6 +161,107 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
     refresh_btn = tk.Button(button_frame, text="Refresh from CSV", command=populate_table)
     refresh_btn.pack(side="left", padx=5)
+
+    def estimate_eta_seconds(event, stage_start_times):
+        stage = event.get("stage", "")
+        current = max(event.get("current", 0), 0)
+        total = max(event.get("total", 1), 1)
+        now = time.time()
+
+        if stage not in stage_start_times:
+            stage_start_times[stage] = now
+
+        if current <= 0:
+            return None
+
+        elapsed = now - stage_start_times[stage]
+        avg_per_unit = elapsed / current
+        remaining = max(total - current, 0)
+        return int(avg_per_unit * remaining)
+
+    def handle_progress_updates():
+        processed_any = False
+        while True:
+            try:
+                event = progress_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            processed_any = True
+            stage = event.get("stage")
+            current = max(event.get("current", 0), 0)
+            total = max(event.get("total", 1), 1)
+            message = event.get("message", "")
+
+            # Map stage progress into global 0-100 progress bar
+            if stage == "download":
+                mapped_progress = 5
+            elif stage == "prepare":
+                mapped_progress = 5 + (current / total) * 45
+            elif stage == "train":
+                mapped_progress = 50 + (current / total) * 50
+            elif stage == "done":
+                mapped_progress = 100
+            else:
+                mapped_progress = progress_value.get()
+
+            progress_value.set(mapped_progress)
+            train_status_var.set(message)
+
+            eta_seconds = estimate_eta_seconds(event, handle_progress_updates.stage_start_times)
+            if stage == "done":
+                eta_var.set("Estimated time left: 0s")
+            elif eta_seconds is None:
+                eta_var.set("Estimated time left: calculating...")
+            else:
+                minutes, seconds = divmod(eta_seconds, 60)
+                eta_var.set(f"Estimated time left: {minutes}m {seconds}s")
+
+            if stage == "done":
+                train_in_progress["value"] = False
+                train_btn.config(state="normal")
+                refresh_btn.config(state="normal")
+
+        if train_in_progress["value"] or processed_any:
+            root.after(250, handle_progress_updates)
+
+    handle_progress_updates.stage_start_times = {}
+
+    def start_global_training():
+        if train_in_progress["value"]:
+            return
+
+        train_in_progress["value"] = True
+        progress_value.set(0)
+        train_status_var.set("Starting global model training...")
+        eta_var.set("Estimated time left: calculating...")
+        train_btn.config(state="disabled")
+        refresh_btn.config(state="disabled")
+        handle_progress_updates.stage_start_times = {}
+
+        def worker():
+            try:
+                tickers = main.get_tickers()
+                main.train_global_model(tickers, progress_callback=progress_queue.put)
+                progress_queue.put({
+                    "stage": "done",
+                    "current": 1,
+                    "total": 1,
+                    "message": "Global model training complete.",
+                })
+            except Exception as exc:
+                progress_queue.put({
+                    "stage": "done",
+                    "current": 1,
+                    "total": 1,
+                    "message": f"Training failed: {exc}",
+                })
+
+        threading.Thread(target=worker, daemon=True).start()
+        handle_progress_updates()
+
+    train_btn = tk.Button(button_frame, text="Train Global Model", command=start_global_training)
+    train_btn.pack(side="left", padx=5)
 
     close_btn = tk.Button(button_frame, text="Close", command=root.destroy)
     close_btn.pack(side="left", padx=5)
