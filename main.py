@@ -82,6 +82,29 @@ def _normalize_ohlcv_dataframe(df):
     return frame
 
 
+def _coerce_to_series(values):
+    """Return a 1D numeric Series for price-like inputs.
+
+    Handles DataFrames produced by yfinance multi-index outputs by selecting the
+    first column. Returns ``None`` when coercion isn't possible.
+    """
+    if values is None:
+        return None
+
+    if isinstance(values, pd.DataFrame):
+        if values.shape[1] == 0:
+            return None
+        values = values.iloc[:, 0]
+
+    if not isinstance(values, pd.Series):
+        try:
+            values = pd.Series(values)
+        except Exception:
+            return None
+
+    return pd.to_numeric(values, errors="coerce")
+
+
 def get_ticker_metadata(ticker):
     """Fetch stock name and market cap for reporting."""
     try:
@@ -130,6 +153,7 @@ def classify_macd_signal(close_series):
     3 = below 0 but rounding upward
     0 = no signal
     """
+    close_series = _coerce_to_series(close_series)
     if close_series is None or len(close_series) < 30:
         return 0
 
@@ -163,6 +187,7 @@ def classify_rsi_signal(close_series, period=14):
     3 = recovering (was <30, now >=30)
     0 = no signal
     """
+    close_series = _coerce_to_series(close_series)
     if close_series is None or len(close_series) < period + 2:
         return 0, None
 
@@ -689,7 +714,7 @@ def run_daily(tickers=None, progress_callback=None):
                     }
                 )
 
-        close_series = ticker_df.get("Close")
+        close_series = _coerce_to_series(ticker_df.get("Close"))
         if close_series is not None and len(close_series) > 30:
             macd_type = classify_macd_signal(close_series)
             rsi_type, rsi_value = classify_rsi_signal(close_series)
