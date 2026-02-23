@@ -154,6 +154,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
     progress_bar = ttk.Progressbar(root, orient="horizontal", mode="determinate", length=700, variable=progress_value)
     progress_bar.pack(padx=10, pady=6, fill="x")
+    progress_bar.pack_forget()
 
     train_status_label = tk.Label(root, textvariable=train_status_var, fg="green")
     train_status_label.pack(pady=2)
@@ -162,15 +163,23 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     eta_label.pack(pady=2)
 
     def _bind_open_chart(tree, ticker_index):
-        def on_double_click(event):
-            item_id = tree.identify_row(event.y)
+        def open_item(item_id):
             if not item_id:
                 return
             values = tree.item(item_id).get("values", [])
             if len(values) > ticker_index and values[ticker_index]:
                 open_tradingview(values[ticker_index])
 
+        def on_double_click(event):
+            open_item(tree.identify_row(event.y))
+
+        def on_enter_key(_event):
+            selected_items = tree.selection()
+            if selected_items:
+                open_item(selected_items[0])
+
         tree.bind("<Double-1>", on_double_click)
+        tree.bind("<Return>", on_enter_key)
 
     _bind_open_chart(ai_tree, 3)
     _bind_open_chart(macd_tree, 2)
@@ -332,6 +341,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
             if stage == "done":
                 task_in_progress["value"] = False
+                progress_bar.pack_forget()
                 train_btn.config(state="normal")
                 run_scan_btn.config(state="normal")
                 refresh_btn.config(state="normal")
@@ -348,6 +358,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
         task_in_progress["value"] = True
         progress_value.set(0)
+        progress_bar.pack(padx=10, pady=6, fill="x")
         train_status_var.set("Starting global model training...")
         eta_var.set("Estimated time left: calculating...")
         train_btn.config(state="disabled")
@@ -372,6 +383,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
         task_in_progress["value"] = True
         progress_value.set(0)
+        progress_bar.pack(padx=10, pady=6, fill="x")
         train_status_var.set("Starting manual daily scan...")
         eta_var.set("Estimated time left: this run can take a few minutes")
         train_btn.config(state="disabled")
