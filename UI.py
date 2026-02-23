@@ -422,7 +422,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         detail_page.pack(expand=True, fill="both", padx=10, pady=6)
         current_page["value"] = "detail"
 
-    def render_stock_detail(payload):
+    def render_stock_detail(payload, listed_5d_pct=None):
         hide_detail_loading_bar()
         ticker = payload.get("ticker", "")
         selected_ticker["value"] = ticker
@@ -440,8 +440,24 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         support_strength_text = f"{support_strength * 100:.1f}%" if isinstance(support_strength, (int, float)) else "N/A"
         resistance_strength_text = f"{resistance_strength * 100:.1f}%" if isinstance(resistance_strength, (int, float)) else "N/A"
 
+        forecast_by_day = {
+            int(row.get("day", 0)): float(row.get("predicted_return", 0.0))
+            for row in forecast
+            if int(row.get("day", 0)) > 0
+        }
+        day1_return_pct = forecast_by_day.get(1, 0.0) * 100
+        day2_return_pct = forecast_by_day.get(2, 0.0) * 100
+        day3_return_pct = forecast_by_day.get(3, 0.0) * 100
+        model_day5_return_pct = forecast_by_day.get(5, trade_plan.get('day5_predicted_return', trade_plan.get('avg_predicted_return', 0.0))) * 100
+        day5_return_pct = float(listed_5d_pct) if listed_5d_pct is not None else float(model_day5_return_pct)
+        day5_confidence_pct = trade_plan.get('day5_confidence', trade_plan.get('avg_confidence', 0)) * 100
+
         summary_lines = [
             f"Current price: ${payload.get('current_price', 0):.2f}",
+            f"Predicted return day 1: {day1_return_pct:+.2f}%",
+            f"Predicted return day 2: {day2_return_pct:+.2f}%",
+            f"Predicted return day 3: {day3_return_pct:+.2f}%",
+            f"Predicted return day 5: {day5_return_pct:+.2f}% (conf {day5_confidence_pct:.1f}%)",
             f"Support used for SL: ${trade_plan.get('support_level', 0):.2f} (AI strength: {support_strength_text})",
             f"Nearest resistance: {resistance_text} (AI strength: {resistance_strength_text})",
             f"Recommended stop loss (support - buffer): ${trade_plan.get('stop_loss', 0):.2f}",
@@ -449,8 +465,10 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             f"SR selection method: {method}",
             f"Position size: {trade_plan.get('position_size_pct', 0) * 100:.1f}% of capital",
             f"Estimated shares (assuming $100,000 capital): {trade_plan.get('shares', 0)}",
-            f"Avg predicted return: {trade_plan.get('avg_predicted_return', 0) * 100:+.2f}% | Avg confidence: {trade_plan.get('avg_confidence', 0) * 100:.1f}%",
+            f"Average across days 1-5: {trade_plan.get('avg_predicted_return', 0) * 100:+.2f}% | Avg confidence: {trade_plan.get('avg_confidence', 0) * 100:.1f}%",
         ]
+        if listed_5d_pct is not None:
+            summary_lines.insert(5, f"List view 5-day return: {listed_5d_pct:+.2f}% | Model day-5 return: {model_day5_return_pct:+.2f}%")
         detail_summary_var.set("\n".join(summary_lines))
 
         day_lines = []
@@ -464,7 +482,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         detail_status_var.set("")
         show_detail_page()
 
-    def load_stock_detail(ticker):
+    def load_stock_detail(ticker, listed_5d_pct=None):
         detail_task_in_progress["value"] = True
         show_detail_loading_bar()
         detail_header_var.set(f"{ticker} - loading analysis...")
@@ -477,7 +495,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         def worker():
             try:
                 payload = main.generate_stock_trade_plan(ticker)
-                progress_queue.put({"stage": "detail_loaded", "payload": payload})
+                progress_queue.put({"stage": "detail_loaded", "payload": payload, "listed_5d_pct": listed_5d_pct})
             except Exception as exc:
                 progress_queue.put({"stage": "detail_error", "ticker": ticker, "message": str(exc), "trace": traceback.format_exc()})
 
@@ -521,7 +539,13 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 return
             values = tree.item(item_id).get("values", [])
             if len(values) > ticker_index and values[ticker_index]:
-                load_stock_detail(values[ticker_index])
+                listed_5d_pct = None
+                if tree is ai_tree and values:
+                    try:
+                        listed_5d_pct = float(str(values[0]).replace("%", "").strip())
+                    except (TypeError, ValueError):
+                        listed_5d_pct = None
+                load_stock_detail(values[ticker_index], listed_5d_pct=listed_5d_pct)
 
         def on_double_click(event):
             open_item(tree.identify_row(event.y))
@@ -693,7 +717,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
             if stage == "detail_loaded":
                 detail_task_in_progress["value"] = False
-                render_stock_detail(event.get("payload", {}))
+                render_stock_detail(event.get("payload", {}), event.get("listed_5d_pct"))
                 continue
             if stage == "detail_error":
                 detail_task_in_progress["value"] = False

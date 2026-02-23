@@ -855,8 +855,12 @@ def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=N
         raise ValueError(f"Unable to generate forecast for {symbol}.")
 
     normalized_df = _normalize_ohlcv_dataframe(ticker_df)
-    atr_series = pd.to_numeric(normalized_df.get("ATR"), errors="coerce")
-    if atr_series is None or atr_series.dropna().empty:
+    atr_values = normalized_df["ATR"] if "ATR" in normalized_df.columns else pd.Series(index=normalized_df.index, dtype=float)
+    atr_series = pd.to_numeric(atr_values, errors="coerce")
+    if np.isscalar(atr_series):
+        atr_series = pd.Series([atr_series], dtype=float)
+
+    if atr_series.dropna().empty:
         atr_window = normalized_df.copy()
         atr_window["TR"] = np.maximum.reduce([
             (atr_window["High"] - atr_window["Low"]).abs(),
@@ -869,6 +873,10 @@ def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=N
 
     avg_return = float(np.mean([f["predicted_return"] for f in forecasts]))
     avg_confidence = float(np.mean([f["confidence"] for f in forecasts]))
+
+    day5_forecast = next((row for row in forecasts if int(row.get("day", 0)) == 5), None)
+    day5_return = float(day5_forecast.get("predicted_return", avg_return)) if day5_forecast else float(avg_return)
+    day5_confidence = float(day5_forecast.get("confidence", avg_confidence)) if day5_forecast else float(avg_confidence)
 
     # Support/Resistance-centric plan using AI-training SR features.
     feature_df = _build_ai_sr_feature_frame(ticker_df)
@@ -925,6 +933,8 @@ def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=N
             "shares": int(max(shares, 0)),
             "avg_predicted_return": float(avg_return),
             "avg_confidence": float(avg_confidence),
+            "day5_predicted_return": float(day5_return),
+            "day5_confidence": float(day5_confidence),
             "support_level": float(primary_support),
             "resistance_level": float(primary_resistance) if np.isfinite(primary_resistance) else None,
             "support_strength": float(support_strength) if np.isfinite(support_strength) else None,
