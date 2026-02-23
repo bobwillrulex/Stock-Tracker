@@ -257,6 +257,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     eta_var = tk.StringVar(value="Estimated time left: --")
     progress_value = tk.DoubleVar(value=0.0)
     task_in_progress = {"value": False}
+    detail_task_in_progress = {"value": False}
     progress_queue = queue.Queue()
 
     progress_bar = ttk.Progressbar(root, orient="horizontal", mode="determinate", length=700, variable=progress_value)
@@ -464,6 +465,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         show_detail_page()
 
     def load_stock_detail(ticker):
+        detail_task_in_progress["value"] = True
         show_detail_loading_bar()
         detail_header_var.set(f"{ticker} - loading analysis...")
         detail_summary_var.set("Computing on-demand forecast and trade plan...")
@@ -480,6 +482,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 progress_queue.put({"stage": "detail_error", "ticker": ticker, "message": str(exc), "trace": traceback.format_exc()})
 
         threading.Thread(target=worker, daemon=True).start()
+        handle_progress_updates()
 
     back_btn = tk.Button(detail_buttons, text="← Back to list", command=show_list_page)
     back_btn.pack(side="left", padx=(0, 8))
@@ -689,9 +692,11 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 mapped_progress = progress_value.get()
 
             if stage == "detail_loaded":
+                detail_task_in_progress["value"] = False
                 render_stock_detail(event.get("payload", {}))
                 continue
             if stage == "detail_error":
+                detail_task_in_progress["value"] = False
                 hide_detail_loading_bar()
                 ticker = event.get("ticker", "")
                 message = event.get("message", "Unknown error")
@@ -724,7 +729,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 refresh_btn.config(state="normal")
                 populate_tables()
 
-        if task_in_progress["value"] or processed_any:
+        if task_in_progress["value"] or detail_task_in_progress["value"] or processed_any:
             root.after(250, handle_progress_updates)
 
     handle_progress_updates.stage_start_times = {}
