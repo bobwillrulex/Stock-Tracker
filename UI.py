@@ -13,6 +13,7 @@ import main
 SIGNALS_CSV_PATH = "buy_signals.csv"
 MACD_SIGNALS_CSV_PATH = "macd_signals.csv"
 RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
+MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
 TV_LAYOUT_ID = "ClEM8BLT"
 
 
@@ -90,13 +91,41 @@ def load_rsi_rows(path=RSI_SIGNALS_CSV_PATH):
     return rows
 
 
+
+
+def load_market_forecast_rows(path=MARKET_FORECAST_CSV_PATH):
+    rows = _load_csv_rows(path, ["day", "percentage", "confidence"])
+    normalized = []
+    for row in rows:
+        day = int(pd.to_numeric(row.get("day", 0), errors="coerce") or 0)
+        if day <= 0:
+            continue
+        normalized.append(
+            {
+                "day": day,
+                "percentage": float(pd.to_numeric(row.get("percentage", 0), errors="coerce") or 0),
+                "confidence": float(pd.to_numeric(row.get("confidence", 0), errors="coerce") or 0),
+            }
+        )
+    return sorted(normalized, key=lambda item: item["day"])
+
 def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     root = tk.Tk()
     root.title("Signals Viewer (AI + MACD + RSI)")
-    root.geometry("1100x700")
+    root.geometry("1200x760")
 
     title_label = tk.Label(root, text="Flat tabs: AI, MACD, and RSI", font=("Arial", 13, "bold"))
     title_label.pack(pady=8)
+
+    market_frame = tk.Frame(root, bd=1, relief="groove", padx=8, pady=6)
+    market_frame.pack(fill="x", padx=10, pady=(0, 6))
+
+    market_title = tk.Label(market_frame, text="S&P 500 Forecast (next 5 trading days)", font=("Arial", 11, "bold"))
+    market_title.pack(anchor="w")
+
+    market_forecast_var = tk.StringVar(value="No S&P 500 forecast data yet. Run a daily scan to generate it.")
+    market_forecast_label = tk.Label(market_frame, textvariable=market_forecast_var, font=("Arial", 10), justify="left", anchor="w")
+    market_forecast_label.pack(fill="x", pady=(2, 0))
 
     notebook = ttk.Notebook(root)
     notebook.pack(expand=True, fill="both", padx=10, pady=6)
@@ -107,6 +136,21 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         "rsi": {"column": None, "ascending": True},
     }
     rows_store = {"ai": [], "macd": [], "rsi": []}
+
+    def render_market_forecast(rows):
+        if not rows:
+            market_forecast_var.set("No S&P 500 forecast data yet. Run a daily scan to generate it.")
+            return
+
+        day_labels = {1: "Tomorrow", 2: "2 days", 3: "3 days", 4: "4 days", 5: "5 days"}
+        chunks = []
+        for row in rows:
+            day = int(row.get("day", 0))
+            chunks.append(
+                f"{day_labels.get(day, f'{day} days')}: {row.get('percentage', 0):+.2f}% (conf {row.get('confidence', 0):.1f}%)"
+            )
+
+        market_forecast_var.set("   |   ".join(chunks))
 
     def build_tree_tab(tab_title, columns, headings, widths):
         frame = ttk.Frame(notebook)
@@ -270,13 +314,15 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         rows_store["ai"] = load_ai_rows(csv_path)
         rows_store["macd"] = load_macd_rows()
         rows_store["rsi"] = load_rsi_rows()
+        market_rows = load_market_forecast_rows()
 
+        render_market_forecast(market_rows)
         rerender_table("ai")
         rerender_table("macd")
         rerender_table("rsi")
 
         status_var.set(
-            f"Loaded AI={len(rows_store['ai'])}, MACD={len(rows_store['macd'])}, RSI={len(rows_store['rsi'])}. Double-click any row to open TradingView."
+            f"Loaded AI={len(rows_store['ai'])}, MACD={len(rows_store['macd'])}, RSI={len(rows_store['rsi'])}, S&P forecasts={len(market_rows)}. Double-click any row to open TradingView."
         )
 
     bind_sorting(ai_tree, "ai", ("percentage", "confidence", "ticker", "marketcap"))
