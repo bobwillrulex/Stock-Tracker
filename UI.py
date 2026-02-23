@@ -5,6 +5,7 @@ import time
 import webbrowser
 import tkinter as tk
 from tkinter import ttk
+from datetime import datetime
 
 import pandas as pd
 
@@ -15,6 +16,7 @@ MACD_SIGNALS_CSV_PATH = "macd_signals.csv"
 RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
 MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
 TV_LAYOUT_ID = "ClEM8BLT"
+FORECAST_TABS_DAYS_TO_KEEP = 5
 
 
 def open_tradingview(ticker):
@@ -109,6 +111,18 @@ def load_market_forecast_rows(path=MARKET_FORECAST_CSV_PATH):
         )
     return sorted(normalized, key=lambda item: item["day"])
 
+
+def load_market_forecast_history(days_to_keep=FORECAST_TABS_DAYS_TO_KEEP):
+    history = main.load_recent_sp500_forecast_history(days_to_keep=days_to_keep)
+    normalized = []
+    for entry in history:
+        run_date = entry.get("run_date")
+        forecasts = sorted(entry.get("forecasts", []), key=lambda item: int(item.get("day", 0)))
+        if not run_date or not forecasts:
+            continue
+        normalized.append({"run_date": run_date, "forecasts": forecasts})
+    return normalized
+
 def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     root = tk.Tk()
     root.title("Signals Viewer (AI + MACD + RSI)")
@@ -127,6 +141,9 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     market_forecast_label = tk.Label(market_frame, textvariable=market_forecast_var, font=("Arial", 10), justify="left", anchor="w")
     market_forecast_label.pack(fill="x", pady=(2, 0))
 
+    market_tabs_frame = tk.Frame(market_frame)
+    market_tabs_frame.pack(fill="x", pady=(6, 0))
+
     notebook = ttk.Notebook(root)
     notebook.pack(expand=True, fill="both", padx=10, pady=6)
 
@@ -136,6 +153,8 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         "rsi": {"column": None, "ascending": True},
     }
     rows_store = {"ai": [], "macd": [], "rsi": []}
+    selected_forecast_date = {"value": None}
+    market_forecast_history = {"rows": []}
 
     def render_market_forecast(rows):
         if not rows:
@@ -151,6 +170,40 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             )
 
         market_forecast_var.set("   |   ".join(chunks))
+
+    def render_market_tabs():
+        for widget in market_tabs_frame.winfo_children():
+            widget.destroy()
+
+        history = market_forecast_history["rows"]
+        if not history:
+            selected_forecast_date["value"] = None
+            return
+
+        available_dates = [item["run_date"] for item in history]
+        if selected_forecast_date["value"] not in available_dates:
+            selected_forecast_date["value"] = available_dates[0]
+
+        for item in history:
+            run_date = item["run_date"]
+            try:
+                label = datetime.strptime(run_date, "%Y-%m-%d").strftime("%b %d")
+            except ValueError:
+                label = run_date
+            is_selected = run_date == selected_forecast_date["value"]
+            tk.Button(
+                market_tabs_frame,
+                text=label,
+                relief="sunken" if is_selected else "raised",
+                padx=10,
+                command=lambda d=run_date: on_market_tab_selected(d),
+            ).pack(side="left", padx=(0, 6))
+
+    def on_market_tab_selected(run_date):
+        selected_forecast_date["value"] = run_date
+        render_market_tabs()
+        selected = next((item for item in market_forecast_history["rows"] if item["run_date"] == run_date), None)
+        render_market_forecast(selected.get("forecasts", []) if selected else [])
 
     def build_tree_tab(tab_title, columns, headings, widths):
         frame = ttk.Frame(notebook)
@@ -314,15 +367,24 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         rows_store["ai"] = load_ai_rows(csv_path)
         rows_store["macd"] = load_macd_rows()
         rows_store["rsi"] = load_rsi_rows()
-        market_rows = load_market_forecast_rows()
+        market_history_rows = load_market_forecast_history()
+        market_forecast_history["rows"] = market_history_rows
 
-        render_market_forecast(market_rows)
+        render_market_tabs()
+        if selected_forecast_date["value"]:
+            selected = next((item for item in market_history_rows if item["run_date"] == selected_forecast_date["value"]), None)
+            render_market_forecast(selected.get("forecasts", []) if selected else [])
+        else:
+            market_rows = load_market_forecast_rows()
+            render_market_forecast(market_rows)
+
         rerender_table("ai")
         rerender_table("macd")
         rerender_table("rsi")
 
+        total_market_rows = sum(len(item.get("forecasts", [])) for item in market_history_rows)
         status_var.set(
-            f"Loaded AI={len(rows_store['ai'])}, MACD={len(rows_store['macd'])}, RSI={len(rows_store['rsi'])}, S&P forecasts={len(market_rows)}. Double-click any row to open TradingView."
+            f"Loaded AI={len(rows_store['ai'])}, MACD={len(rows_store['macd'])}, RSI={len(rows_store['rsi'])}, S&P forecast rows={total_market_rows}. Double-click any row to open TradingView."
         )
 
     bind_sorting(ai_tree, "ai", ("percentage", "confidence", "ticker", "marketcap"))

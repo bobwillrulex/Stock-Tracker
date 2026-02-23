@@ -7,6 +7,7 @@ import json
 from json import JSONDecodeError
 import time
 from datetime import datetime, timedelta
+import sqlite3
 from sklearn.preprocessing import StandardScaler
 
 # ==============================
@@ -32,6 +33,7 @@ SIGNALS_CSV_PATH = "buy_signals.csv"
 MACD_SIGNALS_CSV_PATH = "macd_signals.csv"
 RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
 MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
+MARKET_FORECAST_DB_PATH = "sp500_forecast.db"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 print(f"Using device: {DEVICE}")
@@ -539,6 +541,109 @@ def write_sp500_forecast_csv(forecasts, path=MARKET_FORECAST_CSV_PATH):
     print(f"Wrote {len(rows)} S&P 500 forecast rows to {path}.")
 
 
+def _ensure_sp500_forecast_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sp500_forecast_history (
+            run_date TEXT NOT NULL,
+            day INTEGER NOT NULL,
+            percentage REAL NOT NULL,
+            confidence REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (run_date, day)
+        )
+        """
+    )
+
+
+def save_sp500_forecast_history(forecasts, db_path=MARKET_FORECAST_DB_PATH, run_date=None, days_to_keep=5):
+    """Upsert one run-day and keep only the latest `days_to_keep` run-days."""
+    if run_date is None:
+        run_date = datetime.now().date()
+
+    if isinstance(run_date, datetime):
+        run_date = run_date.date()
+
+    run_date_str = run_date.isoformat()
+    now_str = datetime.now().isoformat(timespec="seconds")
+
+    with sqlite3.connect(db_path) as conn:
+        _ensure_sp500_forecast_table(conn)
+
+        for item in forecasts:
+            day = int(item.get("day", 0))
+            if day <= 0:
+                continue
+
+            percentage = round(float(item.get("predicted_return", 0.0)) * 100, 2)
+            confidence = round(float(item.get("confidence", 0.0)) * 100, 2)
+
+            conn.execute(
+                """
+                INSERT INTO sp500_forecast_history (run_date, day, percentage, confidence, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_date, day) DO UPDATE SET
+                    percentage=excluded.percentage,
+                    confidence=excluded.confidence,
+                    updated_at=excluded.updated_at
+                """,
+                (run_date_str, day, percentage, confidence, now_str, now_str),
+            )
+
+        conn.execute(
+            """
+            DELETE FROM sp500_forecast_history
+            WHERE run_date NOT IN (
+                SELECT run_date
+                FROM sp500_forecast_history
+                GROUP BY run_date
+                ORDER BY run_date DESC
+                LIMIT ?
+            )
+            """,
+            (max(int(days_to_keep), 0),),
+        )
+        conn.commit()
+
+
+def load_recent_sp500_forecast_history(db_path=MARKET_FORECAST_DB_PATH, days_to_keep=5):
+    """Load latest `days_to_keep` run-days of S&P forecast history (newest first)."""
+    if not os.path.exists(db_path):
+        return []
+
+    with sqlite3.connect(db_path) as conn:
+        _ensure_sp500_forecast_table(conn)
+        rows = conn.execute(
+            """
+            WITH recent_dates AS (
+                SELECT run_date
+                FROM sp500_forecast_history
+                GROUP BY run_date
+                ORDER BY run_date DESC
+                LIMIT ?
+            )
+            SELECT h.run_date, h.day, h.percentage, h.confidence
+            FROM sp500_forecast_history h
+            INNER JOIN recent_dates r ON r.run_date = h.run_date
+            ORDER BY h.run_date DESC, h.day ASC
+            """,
+            (max(int(days_to_keep), 0),),
+        ).fetchall()
+
+    grouped = {}
+    for run_date, day, percentage, confidence in rows:
+        grouped.setdefault(run_date, []).append(
+            {
+                "day": int(day),
+                "percentage": float(percentage),
+                "confidence": float(confidence),
+            }
+        )
+
+    return [{"run_date": run_date, "forecasts": forecasts} for run_date, forecasts in grouped.items()]
+
+
 def generate_sp500_forecast(base_model_state=None, checkpoint=None, ticker="^GSPC"):
     """Generate next 1-5 day S&P 500 forecasts from the current global model."""
     try:
@@ -582,6 +687,7 @@ def generate_sp500_forecast(base_model_state=None, checkpoint=None, ticker="^GSP
             )
 
         write_sp500_forecast_csv(forecasts)
+        save_sp500_forecast_history(forecasts)
         return forecasts
     except Exception as exc:
         print(f"S&P 500 forecast generation failed: {exc}")
