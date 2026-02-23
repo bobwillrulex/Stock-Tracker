@@ -10,6 +10,15 @@ from datetime import datetime
 
 import pandas as pd
 
+try:
+    import matplotlib.dates as mdates
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    from matplotlib.figure import Figure
+except ImportError:
+    mdates = None
+    Figure = None
+    FigureCanvasTkAgg = None
+
 import main
 
 SIGNALS_CSV_PATH = "buy_signals.csv"
@@ -283,6 +292,113 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     detail_buttons.pack(anchor="w", padx=10, pady=(0, 8))
 
     selected_ticker = {"value": None}
+    chart_container = tk.Frame(detail_page)
+    chart_container.pack(expand=True, fill="both", padx=10, pady=(2, 10))
+    chart_canvas = {"value": None}
+
+    def clear_detail_chart(message=""):
+        if chart_canvas["value"] is not None:
+            chart_canvas["value"].get_tk_widget().destroy()
+            chart_canvas["value"] = None
+        for widget in chart_container.winfo_children():
+            widget.destroy()
+        if message:
+            tk.Label(chart_container, text=message, fg="gray", anchor="w", justify="left").pack(anchor="w")
+
+    def render_detail_chart(payload):
+        candles = payload.get("daily_candles", [])
+        forecast = sorted(payload.get("forecast", []), key=lambda item: int(item.get("day", 0)))
+        trade_plan = payload.get("trade_plan", {})
+
+        if Figure is None or FigureCanvasTkAgg is None or mdates is None:
+            clear_detail_chart("Chart is unavailable because matplotlib is not installed in this environment.")
+            return
+        if not candles:
+            clear_detail_chart("No candle data available to render chart.")
+            return
+
+        clear_detail_chart()
+
+        candle_df = pd.DataFrame(candles)
+        candle_df["date"] = pd.to_datetime(candle_df["date"], errors="coerce")
+        candle_df = candle_df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
+        if candle_df.empty:
+            clear_detail_chart("No valid candle data available to render chart.")
+            return
+
+        figure = Figure(figsize=(10.5, 4.8), dpi=100)
+        axis = figure.add_subplot(111)
+        axis.set_title(f"{payload.get('ticker', '')} price action + 5-day projection")
+        axis.set_xlabel("Date")
+        axis.set_ylabel("Price (USD)")
+
+        x_dates = candle_df["date"].tolist()
+        x_nums = mdates.date2num(x_dates)
+        candle_width = 0.6
+        color_up = "#2E8B57"
+        color_down = "#C0392B"
+
+        from matplotlib.patches import Rectangle
+
+        for x_num, o, h, l, c in zip(x_nums, candle_df["open"], candle_df["high"], candle_df["low"], candle_df["close"]):
+            color = color_up if c >= o else color_down
+            axis.vlines(x_num, l, h, color=color, linewidth=1.0, zorder=2)
+            lower = min(o, c)
+            height = max(abs(c - o), 0.02)
+            axis.add_patch(
+                Rectangle(
+                    (x_num - candle_width / 2, lower),
+                    candle_width,
+                    height,
+                    facecolor=color,
+                    edgecolor=color,
+                    linewidth=0.6,
+                    zorder=3,
+                )
+            )
+
+        last_date = candle_df["date"].iloc[-1]
+        last_close = float(candle_df["close"].iloc[-1])
+        projected_dates = [last_date + pd.offsets.BDay(int(row.get("day", 0))) for row in forecast if int(row.get("day", 0)) > 0]
+        projected_prices = [float(row.get("projected_price", last_close)) for row in forecast if int(row.get("day", 0)) > 0]
+
+        if projected_dates and projected_prices:
+            axis.plot(projected_dates, projected_prices, color="#1f77b4", marker="o", linewidth=1.8, label="Predicted next 5 days", zorder=4)
+            axis.scatter([last_date], [last_close], color="#1f77b4", s=24, zorder=5)
+
+        stop_loss = trade_plan.get("stop_loss")
+        take_profit = trade_plan.get("take_profit")
+        if isinstance(stop_loss, (int, float)):
+            axis.axhline(stop_loss, linestyle="--", color="#8E44AD", linewidth=1.2, label=f"Stop loss ${stop_loss:.2f}")
+        if isinstance(take_profit, (int, float)):
+            axis.axhline(take_profit, linestyle="--", color="#D35400", linewidth=1.2, label=f"Take profit ${take_profit:.2f}")
+
+        all_prices = candle_df[["low", "high"]].to_numpy().ravel().tolist() + projected_prices
+        if isinstance(stop_loss, (int, float)):
+            all_prices.append(float(stop_loss))
+        if isinstance(take_profit, (int, float)):
+            all_prices.append(float(take_profit))
+
+        min_price = min(all_prices)
+        max_price = max(all_prices)
+        spread = max(max_price - min_price, 0.5)
+        axis.set_ylim(min_price - spread * 0.08, max_price + spread * 0.12)
+
+        x_end = projected_dates[-1] if projected_dates else last_date
+        axis.set_xlim(candle_df["date"].iloc[0] - pd.Timedelta(days=1), x_end + pd.Timedelta(days=1))
+        axis.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=6, maxticks=10))
+        axis.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+        axis.tick_params(axis="x", labelrotation=25)
+        from matplotlib.ticker import MaxNLocator
+        axis.yaxis.set_major_locator(MaxNLocator(nbins=8))
+        axis.grid(True, linestyle=":", linewidth=0.7, alpha=0.6)
+        axis.legend(loc="upper left", fontsize=9)
+
+        figure.tight_layout()
+        tk_canvas = FigureCanvasTkAgg(figure, master=chart_container)
+        tk_canvas.draw()
+        tk_canvas.get_tk_widget().pack(expand=True, fill="both")
+        chart_canvas["value"] = tk_canvas
 
     def show_list_page():
         if current_page["value"] == "list":
@@ -341,6 +457,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 f"Day {day}: {row.get('predicted_return', 0) * 100:+.2f}% (conf {row.get('confidence', 0) * 100:.1f}%) -> ${row.get('projected_price', 0):.2f}"
             )
         detail_forecast_var.set("\n".join(day_lines))
+        render_detail_chart(payload)
         detail_status_var.set("")
         show_detail_page()
 
@@ -348,6 +465,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         detail_header_var.set(f"{ticker} - loading analysis...")
         detail_summary_var.set("Computing on-demand forecast and trade plan...")
         detail_forecast_var.set("")
+        clear_detail_chart("Loading chart data...")
         detail_status_var.set("")
         show_detail_page()
 
@@ -558,6 +676,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 detail_header_var.set(f"{ticker} - analysis failed")
                 detail_summary_var.set("Could not generate on-demand forecast/trade plan.")
                 detail_forecast_var.set("")
+                clear_detail_chart("Unable to render chart for this ticker.")
                 detail_status_var.set(message)
                 show_detail_page()
                 print(event.get("trace", ""))
