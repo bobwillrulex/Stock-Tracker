@@ -278,6 +278,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     detail_summary_var = tk.StringVar(value="")
     detail_forecast_var = tk.StringVar(value="")
     detail_status_var = tk.StringVar(value="")
+    detail_loading_progress = tk.DoubleVar(value=0)
 
     detail_header_label = tk.Label(detail_page, textvariable=detail_header_var, font=("Arial", 13, "bold"))
     detail_header_label.pack(anchor="w", padx=10, pady=(10, 6))
@@ -421,6 +422,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         current_page["value"] = "detail"
 
     def render_stock_detail(payload):
+        hide_detail_loading_bar()
         ticker = payload.get("ticker", "")
         selected_ticker["value"] = ticker
         trade_plan = payload.get("trade_plan", {})
@@ -462,6 +464,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         show_detail_page()
 
     def load_stock_detail(ticker):
+        show_detail_loading_bar()
         detail_header_var.set(f"{ticker} - loading analysis...")
         detail_summary_var.set("Computing on-demand forecast and trade plan...")
         detail_forecast_var.set("")
@@ -490,6 +493,24 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
     detail_status_label = tk.Label(detail_page, textvariable=detail_status_var, fg="blue", justify="left", anchor="w")
     detail_status_label.pack(fill="x", padx=10, pady=(0, 6))
+
+    detail_loading_bar = ttk.Progressbar(
+        detail_page,
+        orient="horizontal",
+        mode="indeterminate",
+        variable=detail_loading_progress,
+        length=520,
+    )
+
+    def show_detail_loading_bar():
+        detail_loading_progress.set(0)
+        if detail_loading_bar.winfo_manager() != "pack":
+            detail_loading_bar.pack(fill="x", padx=10, pady=(0, 8), before=detail_status_label)
+        detail_loading_bar.start(10)
+
+    def hide_detail_loading_bar():
+        detail_loading_bar.stop()
+        detail_loading_bar.pack_forget()
 
     def _bind_open_chart(tree, ticker_index):
         def open_item(item_id):
@@ -671,6 +692,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 render_stock_detail(event.get("payload", {}))
                 continue
             if stage == "detail_error":
+                hide_detail_loading_bar()
                 ticker = event.get("ticker", "")
                 message = event.get("message", "Unknown error")
                 detail_header_var.set(f"{ticker} - analysis failed")
