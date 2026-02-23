@@ -905,6 +905,17 @@ def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=N
     return {
         "ticker": symbol,
         "current_price": float(last_close),
+        "daily_candles": [
+            {
+                "date": idx.strftime("%Y-%m-%d"),
+                "open": float(row.Open),
+                "high": float(row.High),
+                "low": float(row.Low),
+                "close": float(row.Close),
+            }
+            for idx, row in normalized_df[["Open", "High", "Low", "Close"]].tail(90).iterrows()
+            if np.isfinite(row.Open) and np.isfinite(row.High) and np.isfinite(row.Low) and np.isfinite(row.Close)
+        ],
         "forecast": forecasts,
         "trade_plan": {
             "take_profit": float(take_profit),
