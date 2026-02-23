@@ -2,6 +2,7 @@ import os
 import queue
 import threading
 import time
+import traceback
 import webbrowser
 import tkinter as tk
 from tkinter import ttk
@@ -259,13 +260,126 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     eta_label = tk.Label(root, textvariable=eta_var, fg="gray")
     eta_label.pack(pady=2)
 
+    current_page = {"value": "list"}
+    list_page_widgets = []
+    list_page_pack_state = {}
+    detail_page = tk.Frame(root)
+
+    detail_header_var = tk.StringVar(value="Stock detail")
+    detail_summary_var = tk.StringVar(value="")
+    detail_forecast_var = tk.StringVar(value="")
+    detail_status_var = tk.StringVar(value="")
+
+    detail_header_label = tk.Label(detail_page, textvariable=detail_header_var, font=("Arial", 13, "bold"))
+    detail_header_label.pack(anchor="w", padx=10, pady=(10, 6))
+
+    detail_summary_label = tk.Label(detail_page, textvariable=detail_summary_var, justify="left", anchor="w", font=("Arial", 10))
+    detail_summary_label.pack(fill="x", padx=10)
+
+    detail_forecast_label = tk.Label(detail_page, textvariable=detail_forecast_var, justify="left", anchor="w", font=("Arial", 10))
+    detail_forecast_label.pack(fill="x", padx=10, pady=(6, 10))
+
+    detail_buttons = tk.Frame(detail_page)
+    detail_buttons.pack(anchor="w", padx=10, pady=(0, 8))
+
+    selected_ticker = {"value": None}
+
+    def show_list_page():
+        if current_page["value"] == "list":
+            return
+        detail_page.pack_forget()
+        for widget in list_page_widgets:
+            pack_opts = list_page_pack_state.get(widget)
+            if pack_opts:
+                widget.pack(**pack_opts)
+        current_page["value"] = "list"
+
+    def show_detail_page():
+        if current_page["value"] == "detail":
+            return
+        for widget in list_page_widgets:
+            if widget.winfo_manager() == "pack":
+                list_page_pack_state[widget] = widget.pack_info()
+            widget.pack_forget()
+        detail_page.pack(expand=True, fill="both", padx=10, pady=6)
+        current_page["value"] = "detail"
+
+    def render_stock_detail(payload):
+        ticker = payload.get("ticker", "")
+        selected_ticker["value"] = ticker
+        trade_plan = payload.get("trade_plan", {})
+        forecast = payload.get("forecast", [])
+        detail_header_var.set(f"{ticker} - 5 Day Forecast & Trade Plan")
+
+        resistance_level = trade_plan.get("resistance_level")
+        sr_target = trade_plan.get("sr_target")
+        support_strength = trade_plan.get("support_strength")
+        resistance_strength = trade_plan.get("resistance_strength")
+        method = trade_plan.get("sr_method", "sr")
+        resistance_text = f"${resistance_level:.2f}" if isinstance(resistance_level, (int, float)) else "N/A"
+        sr_target_text = f"${sr_target:.2f}" if isinstance(sr_target, (int, float)) else "N/A"
+        support_strength_text = f"{support_strength * 100:.1f}%" if isinstance(support_strength, (int, float)) else "N/A"
+        resistance_strength_text = f"{resistance_strength * 100:.1f}%" if isinstance(resistance_strength, (int, float)) else "N/A"
+
+        summary_lines = [
+            f"Current price: ${payload.get('current_price', 0):.2f}",
+            f"Support used for SL: ${trade_plan.get('support_level', 0):.2f} (AI strength: {support_strength_text})",
+            f"Nearest resistance: {resistance_text} (AI strength: {resistance_strength_text})",
+            f"Recommended stop loss (support - buffer): ${trade_plan.get('stop_loss', 0):.2f}",
+            f"Recommended take profit (SR-led): ${trade_plan.get('take_profit', 0):.2f} (SR target: {sr_target_text})",
+            f"SR selection method: {method}",
+            f"Position size: {trade_plan.get('position_size_pct', 0) * 100:.1f}% of capital",
+            f"Estimated shares (assuming $100,000 capital): {trade_plan.get('shares', 0)}",
+            f"Avg predicted return: {trade_plan.get('avg_predicted_return', 0) * 100:+.2f}% | Avg confidence: {trade_plan.get('avg_confidence', 0) * 100:.1f}%",
+        ]
+        detail_summary_var.set("\n".join(summary_lines))
+
+        day_lines = []
+        for row in forecast:
+            day = int(row.get("day", 0))
+            day_lines.append(
+                f"Day {day}: {row.get('predicted_return', 0) * 100:+.2f}% (conf {row.get('confidence', 0) * 100:.1f}%) -> ${row.get('projected_price', 0):.2f}"
+            )
+        detail_forecast_var.set("\n".join(day_lines))
+        detail_status_var.set("")
+        show_detail_page()
+
+    def load_stock_detail(ticker):
+        detail_header_var.set(f"{ticker} - loading analysis...")
+        detail_summary_var.set("Computing on-demand forecast and trade plan...")
+        detail_forecast_var.set("")
+        detail_status_var.set("")
+        show_detail_page()
+
+        def worker():
+            try:
+                payload = main.generate_stock_trade_plan(ticker)
+                progress_queue.put({"stage": "detail_loaded", "payload": payload})
+            except Exception as exc:
+                progress_queue.put({"stage": "detail_error", "ticker": ticker, "message": str(exc), "trace": traceback.format_exc()})
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    back_btn = tk.Button(detail_buttons, text="← Back to list", command=show_list_page)
+    back_btn.pack(side="left", padx=(0, 8))
+
+    open_tv_btn = tk.Button(
+        detail_buttons,
+        text="Open in TradingView",
+        command=lambda: open_tradingview(selected_ticker["value"]) if selected_ticker["value"] else None,
+    )
+    open_tv_btn.pack(side="left", padx=(0, 8))
+
+    detail_status_label = tk.Label(detail_page, textvariable=detail_status_var, fg="blue", justify="left", anchor="w")
+    detail_status_label.pack(fill="x", padx=10, pady=(0, 6))
+
     def _bind_open_chart(tree, ticker_index):
         def open_item(item_id):
             if not item_id:
                 return
             values = tree.item(item_id).get("values", [])
             if len(values) > ticker_index and values[ticker_index]:
-                open_tradingview(values[ticker_index])
+                load_stock_detail(values[ticker_index])
 
         def on_double_click(event):
             open_item(tree.identify_row(event.y))
@@ -384,7 +498,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
         total_market_rows = sum(len(item.get("forecasts", [])) for item in market_history_rows)
         status_var.set(
-            f"Loaded AI={len(rows_store['ai'])}, MACD={len(rows_store['macd'])}, RSI={len(rows_store['rsi'])}, S&P forecast rows={total_market_rows}. Double-click any row to open TradingView."
+            f"Loaded AI={len(rows_store['ai'])}, MACD={len(rows_store['macd'])}, RSI={len(rows_store['rsi'])}, S&P forecast rows={total_market_rows}. Double-click any row to open on-demand stock analysis."
         )
 
     bind_sorting(ai_tree, "ai", ("percentage", "confidence", "ticker", "marketcap"))
@@ -434,6 +548,20 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 mapped_progress = 100
             else:
                 mapped_progress = progress_value.get()
+
+            if stage == "detail_loaded":
+                render_stock_detail(event.get("payload", {}))
+                continue
+            if stage == "detail_error":
+                ticker = event.get("ticker", "")
+                message = event.get("message", "Unknown error")
+                detail_header_var.set(f"{ticker} - analysis failed")
+                detail_summary_var.set("Could not generate on-demand forecast/trade plan.")
+                detail_forecast_var.set("")
+                detail_status_var.set(message)
+                show_detail_page()
+                print(event.get("trace", ""))
+                continue
 
             progress_value.set(mapped_progress)
             train_status_var.set(message)
@@ -531,6 +659,20 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         fg="gray",
     )
     hint.pack(pady=6)
+
+    list_page_widgets.extend(
+        [
+            title_label,
+            market_frame,
+            notebook,
+            status_label,
+            progress_bar,
+            train_status_label,
+            eta_label,
+            button_frame,
+            hint,
+        ]
+    )
 
     populate_tables()
     root.mainloop()
