@@ -51,6 +51,9 @@ FEATURE_COLUMNS = [
     'MACD', 'MACD_SIGNAL', 'MACD_HIST',
     'Support_20', 'Resistance_20',
     'Fib_236', 'Fib_382', 'Fib_500', 'Fib_618',
+    'Weekly_Support_Dist', 'Weekly_Resistance_Dist',
+    'Weekly_Support_Strength', 'Weekly_Resistance_Strength',
+    'SR_Confluence',
 ]
 INPUT_SIZE = len(FEATURE_COLUMNS)
 
@@ -103,6 +106,59 @@ def _coerce_to_series(values):
             return None
 
     return pd.to_numeric(values, errors="coerce")
+
+def _touch_density(close_series, level_series, atr_series, lookback=20, tolerance=0.75):
+    """Return rolling touch density for a level, normalized to [0,1]."""
+    valid = (
+        close_series.notna()
+        & level_series.notna()
+        & atr_series.notna()
+        & (atr_series > 0)
+    )
+    touch = pd.Series(0.0, index=close_series.index)
+    touch.loc[valid] = (
+        (close_series.loc[valid] - level_series.loc[valid]).abs()
+        <= (atr_series.loc[valid] * tolerance)
+    ).astype(float)
+    return touch.rolling(window=lookback, min_periods=lookback).mean()
+
+
+def add_multitimeframe_sr_features(df):
+    """Add AI-friendly support/resistance strength features using weekly context."""
+    if df is None or len(df) == 0:
+        return df
+
+    frame = df.copy()
+    if not isinstance(frame.index, pd.DatetimeIndex):
+        frame.index = pd.to_datetime(frame.index, errors='coerce')
+    frame = frame[frame.index.notna()]
+
+    close = pd.to_numeric(frame.get('Close'), errors='coerce')
+    atr = pd.to_numeric(frame.get('ATR'), errors='coerce')
+
+    weekly = frame[['High', 'Low']].resample('W-FRI').agg({'High': 'max', 'Low': 'min'})
+    weekly['W_Support'] = weekly['Low'].rolling(window=12, min_periods=12).min()
+    weekly['W_Resistance'] = weekly['High'].rolling(window=12, min_periods=12).max()
+
+    w_support = weekly['W_Support'].reindex(frame.index, method='ffill')
+    w_resistance = weekly['W_Resistance'].reindex(frame.index, method='ffill')
+
+    safe_close = close.replace(0, np.nan)
+    frame['Weekly_Support_Dist'] = (close - w_support) / safe_close
+    frame['Weekly_Resistance_Dist'] = (w_resistance - close) / safe_close
+
+    frame['Weekly_Support_Strength'] = _touch_density(close, w_support, atr, lookback=20, tolerance=0.75)
+    frame['Weekly_Resistance_Strength'] = _touch_density(close, w_resistance, atr, lookback=20, tolerance=0.75)
+
+    support_dist_abs = frame['Weekly_Support_Dist'].abs()
+    resistance_dist_abs = frame['Weekly_Resistance_Dist'].abs()
+    closer_dist = pd.concat([support_dist_abs, resistance_dist_abs], axis=1).min(axis=1)
+    frame['SR_Confluence'] = (
+        (frame['Weekly_Support_Strength'] + frame['Weekly_Resistance_Strength'])
+        / (1 + (closer_dist * 100.0))
+    )
+
+    return frame
 
 
 def get_ticker_metadata(ticker):
@@ -412,6 +468,9 @@ def process_dataframe(df, val_split=VAL_SPLIT):
     df['Fib_382'] = (df['Close'] - (rolling_high - swing_range * 0.382)) / df['Close']
     df['Fib_500'] = (df['Close'] - (rolling_high - swing_range * 0.5)) / df['Close']
     df['Fib_618'] = (df['Close'] - (rolling_high - swing_range * 0.618)) / df['Close']
+
+    # Multi-timeframe AI features for level significance.
+    df = add_multitimeframe_sr_features(df)
 
     df['Target'] = df['Close'].shift(-5) / df['Close'] - 1
     
