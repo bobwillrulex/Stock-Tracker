@@ -31,6 +31,7 @@ WEEKLY_STATE = "weekly_state.json"
 SIGNALS_CSV_PATH = "buy_signals.csv"
 MACD_SIGNALS_CSV_PATH = "macd_signals.csv"
 RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
+MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 print(f"Using device: {DEVICE}")
@@ -418,7 +419,7 @@ def get_tickers():
 # ==============================
 # 1. IMPROVED DATA PROCESSING (No Leakage)
 # ==============================
-def process_dataframe(df, val_split=VAL_SPLIT):
+def process_dataframe(df, val_split=VAL_SPLIT, target_horizon=5):
     """Transforms raw OHLCV data into train/val tensors and prediction window."""
     df = _normalize_ohlcv_dataframe(df)
 
@@ -472,7 +473,8 @@ def process_dataframe(df, val_split=VAL_SPLIT):
     # Multi-timeframe AI features for level significance.
     df = add_multitimeframe_sr_features(df)
 
-    df['Target'] = df['Close'].shift(-5) / df['Close'] - 1
+    target_horizon = int(max(target_horizon, 1))
+    df['Target'] = df['Close'].shift(-target_horizon) / df['Close'] - 1
     
     df = df.replace([np.inf, -np.inf], np.nan).dropna()
     features = FEATURE_COLUMNS
@@ -509,6 +511,72 @@ def process_dataframe(df, val_split=VAL_SPLIT):
         y_val,
         torch.tensor(np.array(X_pred_raw), dtype=torch.float32)
     )
+
+
+def write_sp500_forecast_csv(forecasts, path=MARKET_FORECAST_CSV_PATH):
+    """Persist 1-5 day S&P 500 return + confidence forecasts for the UI header row."""
+    rows = []
+    for item in forecasts:
+        rows.append(
+            {
+                "day": int(item.get("day", 0)),
+                "percentage": round(float(item.get("predicted_return", 0.0)) * 100, 2),
+                "confidence": round(float(item.get("confidence", 0.0)) * 100, 2),
+            }
+        )
+
+    pd.DataFrame(rows, columns=["day", "percentage", "confidence"]).to_csv(path, index=False)
+    print(f"Wrote {len(rows)} S&P 500 forecast rows to {path}.")
+
+
+def generate_sp500_forecast(base_model_state=None, checkpoint=None, ticker="^GSPC"):
+    """Generate next 1-5 day S&P 500 forecasts from the current global model."""
+    try:
+        if base_model_state is None:
+            checkpoint = checkpoint or (BEST_MODEL_PATH if os.path.exists(BEST_MODEL_PATH) else MODEL_PATH)
+            if not os.path.exists(checkpoint):
+                write_sp500_forecast_csv([])
+                return []
+            base_model_state = torch.load(checkpoint, map_location=DEVICE)
+
+        ticker_df = yf.download(ticker, period="5y", progress=False)
+        forecasts = []
+
+        for horizon in range(1, 6):
+            X_train, y_train, X_val, y_val, X_pred = process_dataframe(
+                ticker_df.copy(), val_split=0.1, target_horizon=horizon
+            )
+            if X_train is None:
+                continue
+
+            model = PatternScannerLSTM(input_size=INPUT_SIZE).to(DEVICE)
+            model.load_state_dict(base_model_state)
+            optimizer = torch.optim.AdamW(model.parameters(), lr=LR_FINE_TUNE, weight_decay=WEIGHT_DECAY)
+            loss_fn = nn.MSELoss()
+
+            train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=32, shuffle=True)
+            for _ in range(2):
+                run_epoch(model, train_loader, optimizer, loss_fn, scaler=None)
+
+            model.eval()
+            with torch.no_grad():
+                pred = model(X_pred.unsqueeze(0).to(DEVICE)).item()
+                confidence = compute_confidence_score(model, X_val, y_val, pred)
+
+            forecasts.append(
+                {
+                    "day": horizon,
+                    "predicted_return": float(pred),
+                    "confidence": float(confidence),
+                }
+            )
+
+        write_sp500_forecast_csv(forecasts)
+        return forecasts
+    except Exception as exc:
+        print(f"S&P 500 forecast generation failed: {exc}")
+        write_sp500_forecast_csv([])
+        return []
 
 
 def run_epoch(model, loader, optimizer, loss_fn, scaler=None):
@@ -813,6 +881,7 @@ def run_daily(tickers=None, progress_callback=None):
     torch.save(base_state, MODEL_PATH)
     write_buy_signals_csv(buy_signals)
     write_technical_signals_csv(macd_signals, rsi_signals)
+    generate_sp500_forecast(base_model_state=base_state)
     save_state(None)
     print("Daily run complete.")
 
