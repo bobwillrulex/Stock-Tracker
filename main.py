@@ -695,6 +695,235 @@ def generate_sp500_forecast(base_model_state=None, checkpoint=None, ticker="^GSP
         return []
 
 
+def _build_ai_sr_feature_frame(df):
+    """Build the same SR-related feature set used by model training."""
+    frame = _normalize_ohlcv_dataframe(df).copy()
+    required_cols = {"High", "Low", "Close", "Volume"}
+    if frame is None or frame.empty or not required_cols.issubset(frame.columns):
+        return None
+
+    close_delta = frame['Close'].diff()
+    gains = close_delta.where(close_delta > 0, 0.0)
+    losses = -close_delta.where(close_delta < 0, 0.0)
+    avg_gain = gains.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
+    avg_loss = losses.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    frame['RSI'] = 100 - (100 / (1 + rs))
+
+    high_low = frame['High'] - frame['Low']
+    high_close_prev = (frame['High'] - frame['Close'].shift(1)).abs()
+    low_close_prev = (frame['Low'] - frame['Close'].shift(1)).abs()
+    true_range = np.maximum.reduce([high_low, high_close_prev, low_close_prev])
+    frame['ATR'] = pd.Series(true_range, index=frame.index).ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
+
+    rolling_low = frame['Low'].rolling(window=20, min_periods=20).min()
+    rolling_high = frame['High'].rolling(window=20, min_periods=20).max()
+    frame['Support_20'] = (frame['Close'] - rolling_low) / frame['Close']
+    frame['Resistance_20'] = (rolling_high - frame['Close']) / frame['Close']
+
+    swing_range = (rolling_high - rolling_low).replace(0, np.nan)
+    frame['Fib_236'] = (frame['Close'] - (rolling_high - swing_range * 0.236)) / frame['Close']
+    frame['Fib_382'] = (frame['Close'] - (rolling_high - swing_range * 0.382)) / frame['Close']
+    frame['Fib_500'] = (frame['Close'] - (rolling_high - swing_range * 0.5)) / frame['Close']
+    frame['Fib_618'] = (frame['Close'] - (rolling_high - swing_range * 0.618)) / frame['Close']
+
+    frame = add_multitimeframe_sr_features(frame)
+    frame = frame.replace([np.inf, -np.inf], np.nan)
+    return frame
+
+
+def _select_ai_optimized_levels(feature_df, last_close, atr):
+    """Choose support/resistance using AI training features and SR strength metrics."""
+    if feature_df is None or feature_df.empty:
+        return np.nan, np.nan, np.nan, np.nan
+
+    latest = feature_df.iloc[-1]
+    atr_safe = max(float(atr), 0.01)
+
+    def _to_float(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return np.nan
+
+    support_strength = _to_float(latest.get('Weekly_Support_Strength'))
+    resistance_strength = _to_float(latest.get('Weekly_Resistance_Strength'))
+    sr_confluence = _to_float(latest.get('SR_Confluence'))
+
+    support_candidates = []
+    resistance_candidates = []
+
+    support20 = _to_float(latest.get('Support_20'))
+    resistance20 = _to_float(latest.get('Resistance_20'))
+    if np.isfinite(support20):
+        support_candidates.append(last_close * (1.0 - support20))
+    if np.isfinite(resistance20):
+        resistance_candidates.append(last_close * (1.0 + resistance20))
+
+    ws_dist = _to_float(latest.get('Weekly_Support_Dist'))
+    wr_dist = _to_float(latest.get('Weekly_Resistance_Dist'))
+    if np.isfinite(ws_dist):
+        support_candidates.append(last_close * (1.0 - ws_dist))
+    if np.isfinite(wr_dist):
+        resistance_candidates.append(last_close * (1.0 + wr_dist))
+
+    for fib_col in ('Fib_236', 'Fib_382', 'Fib_500', 'Fib_618'):
+        fib_ratio = _to_float(latest.get(fib_col))
+        if np.isfinite(fib_ratio):
+            fib_level = last_close * (1.0 - fib_ratio)
+            if fib_level < last_close:
+                support_candidates.append(fib_level)
+            elif fib_level > last_close:
+                resistance_candidates.append(fib_level)
+
+    support_candidates = [lvl for lvl in support_candidates if np.isfinite(lvl) and lvl < last_close and lvl > 0]
+    resistance_candidates = [lvl for lvl in resistance_candidates if np.isfinite(lvl) and lvl > last_close]
+
+    def _score(level, strength):
+        dist_pct = abs(level - last_close) / max(last_close, 0.01)
+        proximity = float(np.exp(-dist_pct / 0.03))
+        norm_strength = np.clip(strength if np.isfinite(strength) else 0.5, 0.0, 1.0)
+        norm_conf = np.clip(sr_confluence if np.isfinite(sr_confluence) else 0.5, 0.0, 1.0)
+        # AI-oriented: prioritize learned SR strength/confluence over pure proximity.
+        return (0.25 * proximity) + (0.5 * norm_strength) + (0.25 * norm_conf)
+
+    primary_support = max(support_candidates, key=lambda lvl: _score(lvl, support_strength), default=(last_close - 1.5 * atr_safe))
+    primary_resistance = max(resistance_candidates, key=lambda lvl: _score(lvl, resistance_strength), default=np.nan)
+
+    return (
+        float(primary_support),
+        float(primary_resistance) if np.isfinite(primary_resistance) else np.nan,
+        float(support_strength) if np.isfinite(support_strength) else np.nan,
+        float(resistance_strength) if np.isfinite(resistance_strength) else np.nan,
+    )
+
+
+def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=None, checkpoint=None):
+    """Generate on-demand 5-day forecast and trade plan for a single stock.
+
+    This is intentionally computed lazily when the user opens a stock detail view,
+    so daily scans do not store per-stock forecast payloads.
+    """
+    symbol = str(ticker).strip().upper()
+    if not symbol:
+        raise ValueError("Ticker is required")
+
+    if base_model_state is None:
+        checkpoint = checkpoint or (BEST_MODEL_PATH if os.path.exists(BEST_MODEL_PATH) else MODEL_PATH)
+        if not os.path.exists(checkpoint):
+            raise FileNotFoundError("No trained model checkpoint found. Run training first.")
+        base_model_state = torch.load(checkpoint, map_location=DEVICE)
+
+    ticker_df = yf.download(symbol, period="5y", progress=False)
+    if ticker_df is None or len(ticker_df) < WINDOW_SIZE + 30:
+        raise ValueError(f"Not enough price history for {symbol}.")
+
+    forecasts = []
+    last_close = float(pd.to_numeric(_normalize_ohlcv_dataframe(ticker_df)["Close"], errors="coerce").iloc[-1])
+
+    for horizon in range(1, 6):
+        X_train, y_train, X_val, y_val, X_pred = process_dataframe(
+            ticker_df.copy(), val_split=0.1, target_horizon=horizon
+        )
+        if X_train is None:
+            continue
+
+        model = PatternScannerLSTM(input_size=INPUT_SIZE).to(DEVICE)
+        model.load_state_dict(base_model_state)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=LR_FINE_TUNE, weight_decay=WEIGHT_DECAY)
+        loss_fn = nn.MSELoss()
+
+        train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=32, shuffle=True)
+        for _ in range(2):
+            run_epoch(model, train_loader, optimizer, loss_fn, scaler=None)
+
+        model.eval()
+        with torch.no_grad():
+            pred = model(X_pred.unsqueeze(0).to(DEVICE)).item()
+            confidence = compute_confidence_score(model, X_val, y_val, pred)
+
+        forecasts.append(
+            {
+                "day": horizon,
+                "predicted_return": float(pred),
+                "confidence": float(confidence),
+                "projected_price": float(last_close * (1.0 + pred)),
+            }
+        )
+
+    if not forecasts:
+        raise ValueError(f"Unable to generate forecast for {symbol}.")
+
+    normalized_df = _normalize_ohlcv_dataframe(ticker_df)
+    atr_series = pd.to_numeric(normalized_df.get("ATR"), errors="coerce")
+    if atr_series is None or atr_series.dropna().empty:
+        atr_window = normalized_df.copy()
+        atr_window["TR"] = np.maximum.reduce([
+            (atr_window["High"] - atr_window["Low"]).abs(),
+            (atr_window["High"] - atr_window["Close"].shift(1)).abs(),
+            (atr_window["Low"] - atr_window["Close"].shift(1)).abs(),
+        ])
+        atr = float(pd.to_numeric(atr_window["TR"], errors="coerce").rolling(14).mean().iloc[-1])
+    else:
+        atr = float(atr_series.dropna().iloc[-1])
+
+    avg_return = float(np.mean([f["predicted_return"] for f in forecasts]))
+    avg_confidence = float(np.mean([f["confidence"] for f in forecasts]))
+
+    # Support/Resistance-centric plan using AI-training SR features.
+    feature_df = _build_ai_sr_feature_frame(ticker_df)
+    atr_safe = max(atr, 0.01)
+    primary_support, primary_resistance, support_strength, resistance_strength = _select_ai_optimized_levels(
+        feature_df, last_close, atr_safe
+    )
+
+    # Stop is set just below support with a volatility buffer.
+    stop_loss = max(primary_support - (0.25 * atr_safe), 0.01)
+    risk_per_share = max(last_close - stop_loss, 0.01)
+
+    # TP leans heavily on resistance, with model prediction as secondary anchor.
+    model_target = last_close * (1.0 + max(avg_return, 0.0))
+    if np.isfinite(primary_resistance):
+        sr_target = primary_resistance * 0.995
+        blended_target = (0.7 * sr_target) + (0.3 * model_target)
+    else:
+        sr_target = np.nan
+        blended_target = model_target
+
+    min_r_multiple_target = last_close + (1.5 * risk_per_share)
+    take_profit = max(blended_target, min_r_multiple_target)
+
+    # Position sizing from confidence/edge and volatility clamp.
+    edge_score = max(avg_return, 0.0) / 0.05
+    confidence_score = avg_confidence
+    raw_allocation = 0.3 * edge_score + 0.7 * confidence_score
+    volatility_penalty = min(max((atr / max(last_close, 0.01)), 0.0), 0.08) / 0.08
+    allocation_pct = np.clip(raw_allocation * (1.0 - 0.35 * volatility_penalty), 0.05, 1.0)
+    capital_to_use = float(total_capital) * float(allocation_pct)
+    shares = int(capital_to_use // max(last_close, 0.01))
+
+    return {
+        "ticker": symbol,
+        "current_price": float(last_close),
+        "forecast": forecasts,
+        "trade_plan": {
+            "take_profit": float(take_profit),
+            "stop_loss": float(stop_loss),
+            "position_size_pct": float(allocation_pct),
+            "capital_used": float(capital_to_use),
+            "shares": int(max(shares, 0)),
+            "avg_predicted_return": float(avg_return),
+            "avg_confidence": float(avg_confidence),
+            "support_level": float(primary_support),
+            "resistance_level": float(primary_resistance) if np.isfinite(primary_resistance) else None,
+            "support_strength": float(support_strength) if np.isfinite(support_strength) else None,
+            "resistance_strength": float(resistance_strength) if np.isfinite(resistance_strength) else None,
+            "sr_target": float(sr_target) if np.isfinite(sr_target) else None,
+            "sr_method": "ai_feature_optimized",
+        },
+    }
+
+
 def run_epoch(model, loader, optimizer, loss_fn, scaler=None):
     model.train()
     total_loss = 0.0
