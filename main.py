@@ -855,8 +855,12 @@ def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=N
         raise ValueError(f"Unable to generate forecast for {symbol}.")
 
     normalized_df = _normalize_ohlcv_dataframe(ticker_df)
-    atr_series = pd.to_numeric(normalized_df.get("ATR"), errors="coerce")
-    if atr_series is None or atr_series.dropna().empty:
+    atr_values = normalized_df["ATR"] if "ATR" in normalized_df.columns else pd.Series(index=normalized_df.index, dtype=float)
+    atr_series = pd.to_numeric(atr_values, errors="coerce")
+    if np.isscalar(atr_series):
+        atr_series = pd.Series([atr_series], dtype=float)
+
+    if atr_series.dropna().empty:
         atr_window = normalized_df.copy()
         atr_window["TR"] = np.maximum.reduce([
             (atr_window["High"] - atr_window["Low"]).abs(),
