@@ -477,11 +477,21 @@ def process_dataframe(df, val_split=VAL_SPLIT, target_horizon=5):
     df['Target'] = df['Close'].shift(-target_horizon) / df['Close'] - 1
     
     df = df.replace([np.inf, -np.inf], np.nan).dropna()
+
+    # Some symbols (indexes/futures/thin tickers) can collapse to an empty frame
+    # once indicators are built. Return a graceful skip instead of raising inside
+    # StandardScaler with "0 sample(s)".
+    if len(df) <= WINDOW_SIZE:
+        return None, None, None, None, None
+
     features = FEATURE_COLUMNS
 
     # Split before scaling to prevent leakage
     train_df = df.iloc[:-WINDOW_SIZE].copy()
     predict_df = df.iloc[-WINDOW_SIZE:].copy()
+
+    if train_df.empty or predict_df.empty:
+        return None, None, None, None, None
 
     scaler = StandardScaler()
     X_train_raw = scaler.fit_transform(train_df[features])
