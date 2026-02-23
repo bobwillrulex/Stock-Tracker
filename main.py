@@ -558,7 +558,7 @@ def _ensure_sp500_forecast_table(conn):
 
 
 def save_sp500_forecast_history(forecasts, db_path=MARKET_FORECAST_DB_PATH, run_date=None, days_to_keep=5):
-    """Upsert today's S&P forecast and prune records older than `days_to_keep` days."""
+    """Upsert one run-day and keep only the latest `days_to_keep` run-days."""
     if run_date is None:
         run_date = datetime.now().date()
 
@@ -566,8 +566,6 @@ def save_sp500_forecast_history(forecasts, db_path=MARKET_FORECAST_DB_PATH, run_
         run_date = run_date.date()
 
     run_date_str = run_date.isoformat()
-    cutoff = run_date - timedelta(days=max(days_to_keep - 1, 0))
-    cutoff_str = cutoff.isoformat()
     now_str = datetime.now().isoformat(timespec="seconds")
 
     with sqlite3.connect(db_path) as conn:
@@ -594,30 +592,43 @@ def save_sp500_forecast_history(forecasts, db_path=MARKET_FORECAST_DB_PATH, run_
             )
 
         conn.execute(
-            "DELETE FROM sp500_forecast_history WHERE run_date < ?",
-            (cutoff_str,),
+            """
+            DELETE FROM sp500_forecast_history
+            WHERE run_date NOT IN (
+                SELECT run_date
+                FROM sp500_forecast_history
+                GROUP BY run_date
+                ORDER BY run_date DESC
+                LIMIT ?
+            )
+            """,
+            (max(int(days_to_keep), 0),),
         )
         conn.commit()
 
 
 def load_recent_sp500_forecast_history(db_path=MARKET_FORECAST_DB_PATH, days_to_keep=5):
-    """Load recent S&P forecast history grouped by run date (newest first)."""
+    """Load latest `days_to_keep` run-days of S&P forecast history (newest first)."""
     if not os.path.exists(db_path):
         return []
-
-    cutoff = datetime.now().date() - timedelta(days=max(days_to_keep - 1, 0))
-    cutoff_str = cutoff.isoformat()
 
     with sqlite3.connect(db_path) as conn:
         _ensure_sp500_forecast_table(conn)
         rows = conn.execute(
             """
-            SELECT run_date, day, percentage, confidence
-            FROM sp500_forecast_history
-            WHERE run_date >= ?
-            ORDER BY run_date DESC, day ASC
+            WITH recent_dates AS (
+                SELECT run_date
+                FROM sp500_forecast_history
+                GROUP BY run_date
+                ORDER BY run_date DESC
+                LIMIT ?
+            )
+            SELECT h.run_date, h.day, h.percentage, h.confidence
+            FROM sp500_forecast_history h
+            INNER JOIN recent_dates r ON r.run_date = h.run_date
+            ORDER BY h.run_date DESC, h.day ASC
             """,
-            (cutoff_str,),
+            (max(int(days_to_keep), 0),),
         ).fetchall()
 
     grouped = {}
