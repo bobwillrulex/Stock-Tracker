@@ -874,6 +874,10 @@ def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=N
     avg_return = float(np.mean([f["predicted_return"] for f in forecasts]))
     avg_confidence = float(np.mean([f["confidence"] for f in forecasts]))
 
+    day5_forecast = next((row for row in forecasts if int(row.get("day", 0)) == 5), None)
+    day5_return = float(day5_forecast.get("predicted_return", avg_return)) if day5_forecast else float(avg_return)
+    day5_confidence = float(day5_forecast.get("confidence", avg_confidence)) if day5_forecast else float(avg_confidence)
+
     # Support/Resistance-centric plan using AI-training SR features.
     feature_df = _build_ai_sr_feature_frame(ticker_df)
     atr_safe = max(atr, 0.01)
@@ -929,6 +933,8 @@ def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=N
             "shares": int(max(shares, 0)),
             "avg_predicted_return": float(avg_return),
             "avg_confidence": float(avg_confidence),
+            "day5_predicted_return": float(day5_return),
+            "day5_confidence": float(day5_confidence),
             "support_level": float(primary_support),
             "resistance_level": float(primary_resistance) if np.isfinite(primary_resistance) else None,
             "support_strength": float(support_strength) if np.isfinite(support_strength) else None,
