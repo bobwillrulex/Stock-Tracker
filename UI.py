@@ -5,10 +5,15 @@ import time
 import traceback
 import webbrowser
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, simpledialog, messagebox
 from datetime import datetime
 
 import pandas as pd
+
+try:
+    import yfinance as yf
+except ImportError:
+    yf = None
 
 try:
     import matplotlib.dates as mdates
@@ -138,10 +143,20 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     root.title("Signals Viewer (AI + MACD + RSI)")
     root.geometry("1200x760")
 
-    title_label = tk.Label(root, text="Flat tabs: AI, MACD, and RSI", font=("Arial", 13, "bold"))
+    app_shell = tk.Frame(root)
+    app_shell.pack(expand=True, fill="both")
+
+    content_frame = tk.Frame(app_shell)
+    content_frame.pack(side="left", expand=True, fill="both")
+
+    watchlist_frame = tk.Frame(app_shell, bd=1, relief="groove", padx=8, pady=8, width=280)
+    watchlist_frame.pack(side="right", fill="y")
+    watchlist_frame.pack_propagate(False)
+
+    title_label = tk.Label(content_frame, text="Flat tabs: AI, MACD, and RSI", font=("Arial", 13, "bold"))
     title_label.pack(pady=8)
 
-    market_frame = tk.Frame(root, bd=1, relief="groove", padx=8, pady=6)
+    market_frame = tk.Frame(content_frame, bd=1, relief="groove", padx=8, pady=6)
     market_frame.pack(fill="x", padx=10, pady=(0, 6))
 
     market_title = tk.Label(market_frame, text="S&P 500 Forecast (next 5 trading days)", font=("Arial", 11, "bold"))
@@ -155,7 +170,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     market_tabs_frame.pack(fill="x", pady=(6, 0))
 
     ticker_search_var = tk.StringVar(value="")
-    ticker_search_frame = tk.Frame(root)
+    ticker_search_frame = tk.Frame(content_frame)
     ticker_search_frame.pack(fill="x", padx=10, pady=(0, 4))
 
     ticker_search_inner = tk.Frame(ticker_search_frame)
@@ -171,7 +186,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     ticker_search_status_label = tk.Label(ticker_search_frame, textvariable=ticker_search_status_var, fg="gray")
     ticker_search_status_label.pack(anchor="e", pady=(2, 0))
 
-    notebook = ttk.Notebook(root)
+    notebook = ttk.Notebook(content_frame)
     notebook.pack(expand=True, fill="both", padx=10, pady=6)
 
     sort_states = {
@@ -266,8 +281,112 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         (90, 330, 120, 110, 160),
     )
 
+    watchlist_items = []
+    watchlist_cards_frame = tk.Frame(watchlist_frame)
+    watchlist_cards_frame.pack(expand=True, fill="both", pady=(8, 0))
+
+    watchlist_title = tk.Label(watchlist_frame, text="Watchlist", font=("Arial", 12, "bold"))
+    watchlist_title.pack(anchor="w")
+
+    watchlist_hint = tk.Label(watchlist_frame, text="Pinned like TradingView", fg="gray")
+    watchlist_hint.pack(anchor="w", pady=(0, 4))
+
+    def fetch_watchlist_quote(ticker):
+        if yf is None:
+            return None, None
+        try:
+            quote_df = yf.download(ticker, period="2d", interval="1d", progress=False)
+            if quote_df is None or quote_df.empty:
+                return None, None
+            closes = pd.to_numeric(quote_df["Close"], errors="coerce").dropna()
+            if closes.empty:
+                return None, None
+            latest = float(closes.iloc[-1])
+            if len(closes) >= 2:
+                prev = float(closes.iloc[-2])
+                change_pct = ((latest - prev) / prev) * 100 if prev else 0.0
+            else:
+                change_pct = 0.0
+            return latest, change_pct
+        except Exception:
+            return None, None
+
+    def get_stock_name_for_ticker(ticker):
+        for table in ("ai", "macd", "rsi"):
+            for row in rows_store.get(table, []):
+                if str(row.get("ticker", "")).upper() == ticker:
+                    return row.get("stock_name", "")
+        return ""
+
+    def get_ai_prediction_for_ticker(ticker):
+        for row in rows_store.get("ai", []):
+            if str(row.get("ticker", "")).upper() == ticker:
+                return float(row.get("percentage", 0.0) or 0.0)
+        return None
+
+    def refresh_watchlist_cards():
+        for widget in watchlist_cards_frame.winfo_children():
+            widget.destroy()
+
+        if not watchlist_items:
+            tk.Label(watchlist_cards_frame, text="No stocks added yet.\nUse + Add at the top.", fg="gray", justify="left").pack(anchor="w", pady=6)
+            return
+
+        for item in watchlist_items:
+            ticker = item.get("ticker", "")
+            card = tk.Frame(watchlist_cards_frame, bd=1, relief="ridge", padx=6, pady=6)
+            card.pack(fill="x", pady=(0, 6))
+
+            name = item.get("name") or get_stock_name_for_ticker(ticker) or "Unknown name"
+            ai_5d = get_ai_prediction_for_ticker(ticker)
+            live_price, day_change = fetch_watchlist_quote(ticker)
+
+            tk.Label(card, text=ticker, font=("Arial", 11, "bold")).pack(anchor="w")
+            tk.Label(card, text=f"Price: ${live_price:.2f}" if isinstance(live_price, (int, float)) else "Price: --", anchor="w").pack(anchor="w")
+            if isinstance(day_change, (int, float)):
+                change_text = f"Day: {day_change:+.2f}%"
+                change_color = "#2E8B57" if day_change >= 0 else "#C0392B"
+                tk.Label(card, text=change_text, fg=change_color, anchor="w").pack(anchor="w")
+            else:
+                tk.Label(card, text="Day: --", anchor="w").pack(anchor="w")
+
+            if ai_5d is None:
+                tk.Label(card, text="AI 5D: --", anchor="w").pack(anchor="w")
+            else:
+                ai_color = "#2E8B57" if ai_5d >= 0 else "#C0392B"
+                tk.Label(card, text=f"AI 5D: {ai_5d:+.2f}%", fg=ai_color, anchor="w").pack(anchor="w")
+
+            tk.Label(card, text=name, fg="gray", font=("Arial", 8)).pack(anchor="w", pady=(4, 0))
+
+            def _open_from_watchlist(_event=None, symbol=ticker):
+                if detail_task_in_progress["value"]:
+                    ticker_search_status_var.set("Please wait for the current detail request to finish.")
+                    return
+                ticker_search_status_var.set(f"Loading {symbol}...")
+                load_stock_detail(symbol)
+
+            card.bind("<Button-1>", _open_from_watchlist)
+            for child in card.winfo_children():
+                child.bind("<Button-1>", _open_from_watchlist)
+
+    def add_to_watchlist_from_prompt():
+        ticker = simpledialog.askstring("Add to watchlist", "Enter ticker (e.g. AAPL):", parent=root)
+        if ticker is None:
+            return
+        ticker = ticker.strip().upper()
+        if not ticker:
+            messagebox.showinfo("Watchlist", "Please enter a ticker symbol.")
+            return
+        if any(item.get("ticker") == ticker for item in watchlist_items):
+            messagebox.showinfo("Watchlist", f"{ticker} is already in your watchlist.")
+            return
+        watchlist_items.append({"ticker": ticker, "name": get_stock_name_for_ticker(ticker)})
+        refresh_watchlist_cards()
+
+    add_watchlist_btn = tk.Button(watchlist_frame, text="+ Add", command=add_to_watchlist_from_prompt)
+    add_watchlist_btn.pack(anchor="w", pady=(0, 2))
     status_var = tk.StringVar(value="")
-    status_label = tk.Label(root, textvariable=status_var, fg="blue")
+    status_label = tk.Label(content_frame, textvariable=status_var, fg="blue")
     status_label.pack(pady=4)
 
     train_status_var = tk.StringVar(value="")
@@ -277,20 +396,20 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     detail_task_in_progress = {"value": False}
     progress_queue = queue.Queue()
 
-    progress_bar = ttk.Progressbar(root, orient="horizontal", mode="determinate", length=700, variable=progress_value)
+    progress_bar = ttk.Progressbar(content_frame, orient="horizontal", mode="determinate", length=700, variable=progress_value)
     progress_bar.pack(padx=10, pady=6, fill="x")
     progress_bar.pack_forget()
 
-    train_status_label = tk.Label(root, textvariable=train_status_var, fg="green")
+    train_status_label = tk.Label(content_frame, textvariable=train_status_var, fg="green")
     train_status_label.pack(pady=2)
 
-    eta_label = tk.Label(root, textvariable=eta_var, fg="gray")
+    eta_label = tk.Label(content_frame, textvariable=eta_var, fg="gray")
     eta_label.pack(pady=2)
 
     current_page = {"value": "list"}
     list_page_widgets = []
     list_page_pack_state = {}
-    detail_page = tk.Frame(root)
+    detail_page = tk.Frame(content_frame)
 
     detail_header_var = tk.StringVar(value="Stock detail")
     detail_summary_var = tk.StringVar(value="")
@@ -576,6 +695,9 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     back_btn = tk.Button(detail_buttons, text="← Back to list", command=show_list_page)
     back_btn.pack(side="left", padx=(0, 8))
 
+    add_watchlist_detail_btn = tk.Button(detail_buttons, text="+ Add to watchlist", command=add_selected_ticker_to_watchlist)
+    add_watchlist_detail_btn.pack(side="left", padx=(0, 8))
+
     open_tv_btn = tk.Button(
         detail_buttons,
         text="Open in TradingView",
@@ -632,6 +754,18 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     _bind_open_chart(ai_tree, 3)
     _bind_open_chart(macd_tree, 2)
     _bind_open_chart(rsi_tree, 2)
+
+
+    def add_selected_ticker_to_watchlist():
+        ticker = selected_ticker.get("value")
+        if not ticker:
+            messagebox.showinfo("Watchlist", "Open a stock detail first, then add it.")
+            return
+        if any(item.get("ticker") == ticker for item in watchlist_items):
+            messagebox.showinfo("Watchlist", f"{ticker} is already in your watchlist.")
+            return
+        watchlist_items.append({"ticker": ticker, "name": get_stock_name_for_ticker(ticker)})
+        refresh_watchlist_cards()
 
     def open_ticker_from_search(_event=None):
         if detail_task_in_progress["value"]:
@@ -750,6 +884,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         rerender_table("ai")
         rerender_table("macd")
         rerender_table("rsi")
+        refresh_watchlist_cards()
 
         total_market_rows = sum(len(item.get("forecasts", [])) for item in market_history_rows)
         status_var.set(
@@ -840,6 +975,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 train_btn.config(state="normal")
                 run_scan_btn.config(state="normal")
                 refresh_btn.config(state="normal")
+                refresh_watchlist_cards()
                 populate_tables()
 
         if task_in_progress["value"] or detail_task_in_progress["value"] or processed_any:
@@ -897,7 +1033,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         threading.Thread(target=worker, daemon=True).start()
         handle_progress_updates()
 
-    button_frame = tk.Frame(root)
+    button_frame = tk.Frame(content_frame)
     button_frame.pack(pady=6)
 
     refresh_btn = tk.Button(button_frame, text="Refresh CSV Tabs", command=populate_tables)
@@ -913,7 +1049,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     close_btn.pack(side="left", padx=5)
 
     hint = tk.Label(
-        root,
+        content_frame,
         text="Tip: Daily scan now writes AI (buy_signals.csv), MACD (macd_signals.csv), and RSI (rsi_signals.csv).",
         fg="gray",
     )
