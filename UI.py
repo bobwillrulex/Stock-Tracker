@@ -1,5 +1,6 @@
 import os
 import queue
+import sqlite3
 import threading
 import time
 import traceback
@@ -30,8 +31,68 @@ SIGNALS_CSV_PATH = "buy_signals.csv"
 MACD_SIGNALS_CSV_PATH = "macd_signals.csv"
 RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
 MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
+WATCHLIST_DB_PATH = "watchlist.db"
 TV_LAYOUT_ID = "ClEM8BLT"
 FORECAST_TABS_DAYS_TO_KEEP = 5
+
+
+def _ensure_watchlist_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS watchlist (
+            ticker TEXT PRIMARY KEY,
+            stock_name TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.commit()
+
+
+def load_watchlist_items(path=WATCHLIST_DB_PATH):
+    try:
+        with sqlite3.connect(path) as conn:
+            _ensure_watchlist_table(conn)
+            rows = conn.execute(
+                "SELECT ticker, stock_name FROM watchlist ORDER BY created_at ASC"
+            ).fetchall()
+        return [{"ticker": str(ticker).upper(), "name": stock_name or ""} for ticker, stock_name in rows]
+    except Exception:
+        return []
+
+
+def upsert_watchlist_item(ticker, stock_name="", path=WATCHLIST_DB_PATH):
+    symbol = str(ticker).strip().upper()
+    if not symbol:
+        return
+    try:
+        with sqlite3.connect(path) as conn:
+            _ensure_watchlist_table(conn)
+            conn.execute(
+                """
+                INSERT INTO watchlist (ticker, stock_name, created_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    stock_name = excluded.stock_name
+                """,
+                (symbol, stock_name or ""),
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+
+def delete_watchlist_item(ticker, path=WATCHLIST_DB_PATH):
+    symbol = str(ticker).strip().upper()
+    if not symbol:
+        return
+    try:
+        with sqlite3.connect(path) as conn:
+            _ensure_watchlist_table(conn)
+            conn.execute("DELETE FROM watchlist WHERE ticker = ?", (symbol,))
+            conn.commit()
+    except Exception:
+        pass
 
 
 def open_tradingview(ticker):
@@ -352,9 +413,10 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         (90, 330, 120, 110, 160),
     )
 
-    watchlist_items = []
-    watchlist_cards_frame = tk.Frame(watchlist_frame, bg=colors["panel"])
-    watchlist_cards_frame.pack(expand=True, fill="both", pady=(8, 0))
+    watchlist_items = load_watchlist_items()
+    watchlist_prediction_cache = {}
+    watchlist_prediction_in_flight = set()
+    watchlist_prediction_queue = queue.Queue()
 
     watchlist_title = tk.Label(watchlist_frame, text="Watchlist", font=("Arial", 12, "bold"), bg=colors["panel"], fg=colors["text"])
     watchlist_title.pack(anchor="w")
@@ -366,12 +428,22 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         if yf is None:
             return None, None
         try:
-            quote_df = yf.download(ticker, period="2d", interval="1d", progress=False)
+            quote_df = yf.Ticker(ticker).history(period="5d", interval="1d", auto_adjust=False)
+            if quote_df is None or quote_df.empty:
+                quote_df = yf.download(ticker, period="5d", interval="1d", progress=False)
             if quote_df is None or quote_df.empty:
                 return None, None
-            closes = pd.to_numeric(quote_df["Close"], errors="coerce").dropna()
+
+            close_values = quote_df.get("Close")
+            if isinstance(close_values, pd.DataFrame):
+                if close_values.shape[1] == 0:
+                    return None, None
+                close_values = close_values.iloc[:, 0]
+
+            closes = pd.to_numeric(close_values, errors="coerce").dropna()
             if closes.empty:
                 return None, None
+
             latest = float(closes.iloc[-1])
             if len(closes) >= 2:
                 prev = float(closes.iloc[-2])
@@ -395,6 +467,79 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 return float(row.get("percentage", 0.0) or 0.0)
         return None
 
+    def request_watchlist_prediction(ticker):
+        symbol = str(ticker).upper()
+        if symbol in watchlist_prediction_in_flight:
+            return
+        watchlist_prediction_in_flight.add(symbol)
+
+        def worker():
+            try:
+                payload = main.generate_stock_trade_plan(symbol)
+                day5 = payload.get("trade_plan", {}).get("day5_predicted_return")
+                value = float(day5) * 100 if day5 is not None else None
+            except Exception:
+                value = None
+            watchlist_prediction_queue.put((symbol, value))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def process_watchlist_prediction_queue():
+        dirty = False
+        while True:
+            try:
+                symbol, value = watchlist_prediction_queue.get_nowait()
+            except queue.Empty:
+                break
+            watchlist_prediction_in_flight.discard(symbol)
+            if value is not None:
+                watchlist_prediction_cache[symbol] = value
+            dirty = True
+        if dirty:
+            refresh_watchlist_cards()
+        root.after(300, process_watchlist_prediction_queue)
+
+    def get_watchlist_prediction_value(ticker):
+        symbol = str(ticker).upper()
+        ai_prediction = get_ai_prediction_for_ticker(symbol)
+        if ai_prediction is not None and ai_prediction > 2.0:
+            return ai_prediction
+
+        cached = watchlist_prediction_cache.get(symbol)
+        if cached is None:
+            request_watchlist_prediction(symbol)
+        return cached
+
+    watchlist_cards_canvas = tk.Canvas(
+        watchlist_frame,
+        bg=colors["panel"],
+        highlightthickness=0,
+        bd=0,
+        relief="flat",
+    )
+    watchlist_cards_scrollbar = tk.Scrollbar(watchlist_frame, orient="vertical", command=watchlist_cards_canvas.yview)
+    watchlist_cards_canvas.configure(yscrollcommand=watchlist_cards_scrollbar.set)
+    watchlist_cards_canvas.pack(side="left", expand=True, fill="both", pady=(8, 0))
+    watchlist_cards_scrollbar.pack(side="right", fill="y", pady=(8, 0))
+
+    watchlist_cards_frame = tk.Frame(watchlist_cards_canvas, bg=colors["panel"])
+    watchlist_window = watchlist_cards_canvas.create_window((0, 0), window=watchlist_cards_frame, anchor="nw")
+
+    def sync_watchlist_scroll_region(_event=None):
+        watchlist_cards_canvas.configure(scrollregion=watchlist_cards_canvas.bbox("all"))
+
+    def sync_watchlist_window_width(event):
+        watchlist_cards_canvas.itemconfig(watchlist_window, width=event.width)
+
+    watchlist_cards_frame.bind("<Configure>", sync_watchlist_scroll_region)
+    watchlist_cards_canvas.bind("<Configure>", sync_watchlist_window_width)
+
+    def _watchlist_on_mousewheel(event):
+        if event.delta:
+            watchlist_cards_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    watchlist_cards_canvas.bind_all("<MouseWheel>", _watchlist_on_mousewheel)
+
     def refresh_watchlist_cards():
         for widget in watchlist_cards_frame.winfo_children():
             widget.destroy()
@@ -409,8 +554,41 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             card.pack(fill="x", pady=(0, 6))
 
             name = item.get("name") or get_stock_name_for_ticker(ticker) or "Unknown name"
-            ai_5d = get_ai_prediction_for_ticker(ticker)
+            ai_5d = get_watchlist_prediction_value(ticker)
             live_price, day_change = fetch_watchlist_quote(ticker)
+
+            delete_btn = tk.Button(
+                card,
+                text="✕",
+                bg="#3A4150",
+                fg=colors["text"],
+                activebackground="#4A5264",
+                activeforeground=colors["text"],
+                relief="flat",
+                bd=0,
+                padx=4,
+                pady=1,
+                cursor="hand2",
+                font=("Arial", 8, "bold"),
+            )
+
+            def remove_from_watchlist(symbol=ticker):
+                nonlocal watchlist_items
+                watchlist_items = [row for row in watchlist_items if row.get("ticker") != symbol]
+                delete_watchlist_item(symbol)
+                refresh_watchlist_cards()
+
+            delete_btn.configure(command=remove_from_watchlist)
+            delete_btn.place_forget()
+
+            def show_delete(_event=None):
+                delete_btn.place(relx=1.0, x=-6, y=6, anchor="ne")
+
+            def hide_delete(_event=None):
+                delete_btn.place_forget()
+
+            card.bind("<Enter>", show_delete)
+            card.bind("<Leave>", hide_delete)
 
             tk.Label(card, text=ticker, font=("Arial", 11, "bold"), bg=colors["panel_soft"], fg=colors["text"]).pack(anchor="w")
             tk.Label(card, text=f"Price: ${live_price:.2f}" if isinstance(live_price, (int, float)) else "Price: --", anchor="w", bg=colors["panel_soft"], fg=colors["text"]).pack(anchor="w")
@@ -438,6 +616,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
             card.bind("<Button-1>", _open_from_watchlist)
             for child in card.winfo_children():
+                child.bind("<Enter>", show_delete)
                 child.bind("<Button-1>", _open_from_watchlist)
 
     def add_to_watchlist_from_prompt():
@@ -451,11 +630,14 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         if any(item.get("ticker") == ticker for item in watchlist_items):
             messagebox.showinfo("Watchlist", f"{ticker} is already in your watchlist.")
             return
-        watchlist_items.append({"ticker": ticker, "name": get_stock_name_for_ticker(ticker)})
+        stock_name = get_stock_name_for_ticker(ticker)
+        watchlist_items.append({"ticker": ticker, "name": stock_name})
+        upsert_watchlist_item(ticker, stock_name)
         refresh_watchlist_cards()
 
     add_watchlist_btn = make_button(watchlist_frame, "+ Add", add_to_watchlist_from_prompt, accent=True)
-    add_watchlist_btn.pack(anchor="w", pady=(0, 2))
+    add_watchlist_btn.pack(anchor="w", pady=(0, 2), before=watchlist_cards_canvas)
+    process_watchlist_prediction_queue()
     status_var = tk.StringVar(value="")
     status_label = tk.Label(content_frame, textvariable=status_var, fg=colors["accent"], bg=colors["bg"])
     status_label.pack(pady=4)
@@ -771,7 +953,9 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         if any(item.get("ticker") == ticker for item in watchlist_items):
             messagebox.showinfo("Watchlist", f"{ticker} is already in your watchlist.")
             return
-        watchlist_items.append({"ticker": ticker, "name": get_stock_name_for_ticker(ticker)})
+        stock_name = get_stock_name_for_ticker(ticker)
+        watchlist_items.append({"ticker": ticker, "name": stock_name})
+        upsert_watchlist_item(ticker, stock_name)
         refresh_watchlist_cards()
 
     back_btn = make_button(detail_buttons, "← Back to list", show_list_page)
