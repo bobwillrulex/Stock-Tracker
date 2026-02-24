@@ -329,29 +329,30 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             return
 
         figure = Figure(figsize=(10.5, 7.2), dpi=100)
-        price_axis = figure.add_subplot(311)
-        macd_axis = figure.add_subplot(312, sharex=price_axis)
-        rsi_axis = figure.add_subplot(313, sharex=price_axis)
+        grid = figure.add_gridspec(3, 1, height_ratios=[70, 15, 15], hspace=0.06)
+        price_axis = figure.add_subplot(grid[0])
+        macd_axis = figure.add_subplot(grid[1], sharex=price_axis)
+        rsi_axis = figure.add_subplot(grid[2], sharex=price_axis)
 
         price_axis.set_title(f"{payload.get('ticker', '')} price action + 5-day projection")
         price_axis.set_ylabel("Price (USD)")
 
-        x_dates = candle_df["date"].tolist()
-        x_nums = mdates.date2num(x_dates)
+        history_count = len(candle_df)
+        x_positions = list(range(history_count))
         candle_width = 0.6
         color_up = "#2E8B57"
         color_down = "#C0392B"
 
         from matplotlib.patches import Rectangle
 
-        for x_num, o, h, l, c in zip(x_nums, candle_df["open"], candle_df["high"], candle_df["low"], candle_df["close"]):
+        for x_pos, o, h, l, c in zip(x_positions, candle_df["open"], candle_df["high"], candle_df["low"], candle_df["close"]):
             color = color_up if c >= o else color_down
-            price_axis.vlines(x_num, l, h, color=color, linewidth=1.0, zorder=2)
+            price_axis.vlines(x_pos, l, h, color=color, linewidth=1.0, zorder=2)
             lower = min(o, c)
             height = max(abs(c - o), 0.02)
             price_axis.add_patch(
                 Rectangle(
-                    (x_num - candle_width / 2, lower),
+                    (x_pos - candle_width / 2, lower),
                     candle_width,
                     height,
                     facecolor=color,
@@ -365,10 +366,11 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         last_close = float(candle_df["close"].iloc[-1])
         projected_dates = [last_date + pd.offsets.BDay(int(row.get("day", 0))) for row in forecast if int(row.get("day", 0)) > 0]
         projected_prices = [float(row.get("projected_price", last_close)) for row in forecast if int(row.get("day", 0)) > 0]
+        projected_positions = [history_count - 1 + int(row.get("day", 0)) for row in forecast if int(row.get("day", 0)) > 0]
 
-        if projected_dates and projected_prices:
-            price_axis.plot(projected_dates, projected_prices, color="#1f77b4", marker="o", linewidth=1.8, label="Predicted next 5 days", zorder=4)
-            price_axis.scatter([last_date], [last_close], color="#1f77b4", s=24, zorder=5)
+        if projected_positions and projected_prices:
+            price_axis.plot(projected_positions, projected_prices, color="#1f77b4", marker="o", linewidth=1.8, label="Predicted next 5 days", zorder=4)
+            price_axis.scatter([history_count - 1], [last_close], color="#1f77b4", s=24, zorder=5)
 
         stop_loss = trade_plan.get("stop_loss")
         take_profit = trade_plan.get("take_profit")
@@ -388,11 +390,8 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         spread = max(max_price - min_price, 0.5)
         price_axis.set_ylim(min_price - spread * 0.08, max_price + spread * 0.12)
 
-        x_end = projected_dates[-1] if projected_dates else last_date
-        price_axis.set_xlim(candle_df["date"].iloc[0] - pd.Timedelta(days=1), x_end + pd.Timedelta(days=1))
-        price_axis.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=6, maxticks=10))
-        price_axis.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
-        price_axis.tick_params(axis="x", labelrotation=25)
+        x_end = projected_positions[-1] if projected_positions else history_count - 1
+        price_axis.set_xlim(-1, x_end + 1)
         from matplotlib.ticker import MaxNLocator
         price_axis.yaxis.set_major_locator(MaxNLocator(nbins=8))
         price_axis.grid(True, linestyle=":", linewidth=0.7, alpha=0.6)
@@ -407,9 +406,9 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         macd_hist = macd_line - macd_signal
 
         macd_colors = ["#2E8B57" if value >= 0 else "#C0392B" for value in macd_hist]
-        macd_axis.bar(candle_df["date"], macd_hist, width=0.8, color=macd_colors, alpha=0.5, label="Histogram")
-        macd_axis.plot(candle_df["date"], macd_line, color="#1f77b4", linewidth=1.3, label="MACD")
-        macd_axis.plot(candle_df["date"], macd_signal, color="#E67E22", linewidth=1.3, label="Signal")
+        macd_axis.bar(x_positions, macd_hist, width=0.8, color=macd_colors, alpha=0.5, label="Histogram")
+        macd_axis.plot(x_positions, macd_line, color="#1f77b4", linewidth=1.3, label="MACD")
+        macd_axis.plot(x_positions, macd_signal, color="#E67E22", linewidth=1.3, label="Signal")
         macd_axis.axhline(0, color="gray", linewidth=0.8, linestyle="--")
         macd_axis.set_ylabel("MACD")
         macd_axis.grid(True, linestyle=":", linewidth=0.7, alpha=0.5)
@@ -423,7 +422,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         rs = avg_gain / avg_loss.replace(0, pd.NA)
         rsi = 100 - (100 / (1 + rs))
 
-        rsi_axis.plot(candle_df["date"], rsi, color="#8E44AD", linewidth=1.4, label="RSI (14)")
+        rsi_axis.plot(x_positions, rsi, color="#8E44AD", linewidth=1.4, label="RSI (14)")
         rsi_axis.axhline(70, color="#C0392B", linestyle="--", linewidth=1.0)
         rsi_axis.axhline(30, color="#2E8B57", linestyle="--", linewidth=1.0)
         rsi_axis.set_ylim(0, 100)
@@ -431,7 +430,21 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         rsi_axis.set_xlabel("Date")
         rsi_axis.grid(True, linestyle=":", linewidth=0.7, alpha=0.5)
         rsi_axis.legend(loc="upper left", fontsize=8)
-        rsi_axis.tick_params(axis="x", labelrotation=25)
+        tick_positions = sorted(set([0, max(0, history_count // 2), history_count - 1] + projected_positions))
+        tick_labels = []
+        future_label_map = {
+            history_count - 1 + int(row.get("day", 0)): (last_date + pd.offsets.BDay(int(row.get("day", 0)))).strftime("%Y-%m-%d")
+            for row in forecast
+            if int(row.get("day", 0)) > 0
+        }
+        for pos in tick_positions:
+            if pos < history_count:
+                tick_labels.append(candle_df["date"].iloc[pos].strftime("%Y-%m-%d"))
+            else:
+                tick_labels.append(future_label_map.get(pos, ""))
+
+        rsi_axis.set_xticks(tick_positions)
+        rsi_axis.set_xticklabels(tick_labels, rotation=25, ha="right")
 
         price_axis.tick_params(axis="x", labelbottom=False)
         macd_axis.tick_params(axis="x", labelbottom=False)
