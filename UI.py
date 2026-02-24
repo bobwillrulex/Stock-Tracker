@@ -154,6 +154,23 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     market_tabs_frame = tk.Frame(market_frame)
     market_tabs_frame.pack(fill="x", pady=(6, 0))
 
+    ticker_search_var = tk.StringVar(value="")
+    ticker_search_frame = tk.Frame(root)
+    ticker_search_frame.pack(fill="x", padx=10, pady=(0, 4))
+
+    ticker_search_inner = tk.Frame(ticker_search_frame)
+    ticker_search_inner.pack(anchor="e")
+
+    ticker_search_label = tk.Label(ticker_search_inner, text="Open ticker:")
+    ticker_search_label.pack(side="left", padx=(0, 6))
+
+    ticker_search_entry = tk.Entry(ticker_search_inner, textvariable=ticker_search_var, width=14)
+    ticker_search_entry.pack(side="left")
+
+    ticker_search_status_var = tk.StringVar(value="")
+    ticker_search_status_label = tk.Label(ticker_search_frame, textvariable=ticker_search_status_var, fg="gray")
+    ticker_search_status_label.pack(anchor="e", pady=(2, 0))
+
     notebook = ttk.Notebook(root)
     notebook.pack(expand=True, fill="both", padx=10, pady=6)
 
@@ -537,6 +554,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
     def load_stock_detail(ticker, listed_5d_pct=None):
         detail_task_in_progress["value"] = True
+        ticker_search_status_var.set("")
         show_detail_loading_bar()
         detail_header_var.set(f"{ticker} - loading analysis...")
         detail_summary_var.set("Computing on-demand forecast and trade plan...")
@@ -614,6 +632,24 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     _bind_open_chart(ai_tree, 3)
     _bind_open_chart(macd_tree, 2)
     _bind_open_chart(rsi_tree, 2)
+
+    def open_ticker_from_search(_event=None):
+        if detail_task_in_progress["value"]:
+            ticker_search_status_var.set("Please wait for the current detail request to finish.")
+            return
+
+        ticker = ticker_search_var.get().strip().upper()
+        if not ticker:
+            ticker_search_status_var.set("Enter a ticker symbol (for example: MSFT).")
+            return
+
+        ticker_search_status_var.set(f"Loading {ticker}...")
+        load_stock_detail(ticker)
+
+    ticker_search_btn = tk.Button(ticker_search_inner, text="Go", command=open_ticker_from_search)
+    ticker_search_btn.pack(side="left", padx=(6, 0))
+
+    ticker_search_entry.bind("<Return>", open_ticker_from_search)
 
     def render_ai(rows):
         for item_id in ai_tree.get_children():
