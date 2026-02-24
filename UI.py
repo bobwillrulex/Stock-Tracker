@@ -107,6 +107,20 @@ def open_tradingview(ticker):
     webbrowser.open(url)
 
 
+def normalize_ticker_input(raw_ticker):
+    """Normalize user-entered ticker symbols for yfinance/trading flows."""
+    symbol = str(raw_ticker or "").strip().upper()
+    if not symbol:
+        return ""
+
+    symbol = symbol.replace(" ", "")
+    if symbol.startswith("TSX:"):
+        symbol = f"{symbol.split(':', 1)[1]}.TO"
+    if symbol.endswith("-TO"):
+        symbol = symbol[:-3] + ".TO"
+    return symbol
+
+
 def format_mcap(value):
     """Render numeric market caps in a compact human-readable format."""
     try:
@@ -538,7 +552,14 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         if event.delta:
             watchlist_cards_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-    watchlist_cards_canvas.bind_all("<MouseWheel>", _watchlist_on_mousewheel)
+    def _bind_watchlist_mousewheel(_event=None):
+        watchlist_cards_canvas.bind_all("<MouseWheel>", _watchlist_on_mousewheel)
+
+    def _unbind_watchlist_mousewheel(_event=None):
+        watchlist_cards_canvas.unbind_all("<MouseWheel>")
+
+    watchlist_cards_canvas.bind("<Enter>", _bind_watchlist_mousewheel)
+    watchlist_cards_canvas.bind("<Leave>", _unbind_watchlist_mousewheel)
 
     def refresh_watchlist_cards():
         for widget in watchlist_cards_frame.winfo_children():
@@ -579,25 +600,25 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 refresh_watchlist_cards()
 
             delete_btn.configure(command=remove_from_watchlist)
-            delete_btn.place_forget()
+            delete_btn.place(relx=1.0, x=-6, y=6, anchor="ne")
 
-            def show_delete(_event=None):
-                delete_btn.place(relx=1.0, x=-6, y=6, anchor="ne")
+            header_row = tk.Frame(card, bg=colors["panel_soft"])
+            header_row.pack(fill="x", anchor="w")
 
-            def hide_delete(_event=None):
-                delete_btn.place_forget()
-
-            card.bind("<Enter>", show_delete)
-            card.bind("<Leave>", hide_delete)
-
-            tk.Label(card, text=ticker, font=("Arial", 11, "bold"), bg=colors["panel_soft"], fg=colors["text"]).pack(anchor="w")
-            tk.Label(card, text=f"Price: ${live_price:.2f}" if isinstance(live_price, (int, float)) else "Price: --", anchor="w", bg=colors["panel_soft"], fg=colors["text"]).pack(anchor="w")
+            tk.Label(header_row, text=ticker, font=("Arial", 11, "bold"), bg=colors["panel_soft"], fg=colors["text"]).pack(side="left")
+            tk.Label(
+                header_row,
+                text=f"  ${live_price:.2f}" if isinstance(live_price, (int, float)) else "  --",
+                bg=colors["panel_soft"],
+                fg=colors["text"],
+                font=("Arial", 10),
+            ).pack(side="left")
             if isinstance(day_change, (int, float)):
-                change_text = f"Day: {day_change:+.2f}%"
+                change_text = f"  {day_change:+.2f}%"
                 change_color = "#2E8B57" if day_change >= 0 else "#C0392B"
-                tk.Label(card, text=change_text, fg=change_color, bg=colors["panel_soft"], anchor="w").pack(anchor="w")
+                tk.Label(header_row, text=change_text, fg=change_color, bg=colors["panel_soft"], font=("Arial", 10, "bold")).pack(side="left")
             else:
-                tk.Label(card, text="Day: --", bg=colors["panel_soft"], fg=colors["text"], anchor="w").pack(anchor="w")
+                tk.Label(header_row, text="  --", bg=colors["panel_soft"], fg=colors["text"], font=("Arial", 10)).pack(side="left")
 
             if ai_5d is None:
                 tk.Label(card, text="AI 5D: --", bg=colors["panel_soft"], fg=colors["text"], anchor="w").pack(anchor="w")
@@ -616,14 +637,15 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
             card.bind("<Button-1>", _open_from_watchlist)
             for child in card.winfo_children():
-                child.bind("<Enter>", show_delete)
+                if child is delete_btn:
+                    continue
                 child.bind("<Button-1>", _open_from_watchlist)
 
     def add_to_watchlist_from_prompt():
         ticker = simpledialog.askstring("Add to watchlist", "Enter ticker (e.g. AAPL):", parent=root)
         if ticker is None:
             return
-        ticker = ticker.strip().upper()
+        ticker = normalize_ticker_input(ticker)
         if not ticker:
             messagebox.showinfo("Watchlist", "Please enter a ticker symbol.")
             return
@@ -1028,7 +1050,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             ticker_search_status_var.set("Please wait for the current detail request to finish.")
             return
 
-        ticker = ticker_search_var.get().strip().upper()
+        ticker = normalize_ticker_input(ticker_search_var.get())
         if not ticker:
             ticker_search_status_var.set("Enter a ticker symbol (for example: MSFT).")
             return
