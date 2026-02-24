@@ -143,50 +143,115 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     root.title("Signals Viewer (AI + MACD + RSI)")
     root.geometry("1200x760")
 
-    app_shell = tk.Frame(root)
+    colors = {
+        "bg": "#111318",
+        "panel": "#1A1F27",
+        "panel_soft": "#222834",
+        "text": "#E8ECF3",
+        "muted": "#9AA4B2",
+        "accent": "#5DADE2",
+        "accent_hover": "#74B9FF",
+        "border": "#2D3542",
+        "success": "#58D68D",
+        "danger": "#FF6B6B",
+    }
+
+    root.configure(bg=colors["bg"])
+    root.option_add("*Font", "Arial 10")
+    root.option_add("*Background", colors["bg"])
+    root.option_add("*Foreground", colors["text"])
+    root.option_add("*Entry.Background", colors["panel_soft"])
+    root.option_add("*Entry.Foreground", colors["text"])
+    root.option_add("*Entry.insertBackground", colors["text"])
+
+    style = ttk.Style(root)
+    style.theme_use("clam")
+    style.configure("Dark.TFrame", background=colors["bg"])
+    style.configure("Dark.TNotebook", background=colors["bg"], borderwidth=0)
+    style.configure("Dark.TNotebook.Tab", background=colors["panel_soft"], foreground=colors["text"], padding=(12, 8))
+    style.map(
+        "Dark.TNotebook.Tab",
+        background=[("selected", colors["panel"]), ("active", colors["panel_soft"])],
+        foreground=[("selected", colors["accent"]), ("active", colors["text"])],
+    )
+    style.configure(
+        "Dark.Treeview",
+        background=colors["panel"],
+        fieldbackground=colors["panel"],
+        foreground=colors["text"],
+        bordercolor=colors["border"],
+        rowheight=28,
+    )
+    style.configure(
+        "Dark.Treeview.Heading",
+        background=colors["panel_soft"],
+        foreground=colors["text"],
+        relief="flat",
+        font=("Arial", 10, "bold"),
+    )
+    style.map("Dark.Treeview", background=[("selected", "#2F3A4A")], foreground=[("selected", colors["text"])])
+    style.configure("Dark.Horizontal.TProgressbar", troughcolor=colors["panel_soft"], background=colors["accent"], bordercolor=colors["border"], lightcolor=colors["accent"], darkcolor=colors["accent"])
+
+    def make_button(parent, text, command, accent=False):
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=colors["accent"] if accent else colors["panel_soft"],
+            fg="#0F1115" if accent else colors["text"],
+            activebackground=colors["accent_hover"] if accent else "#2B3341",
+            activeforeground="#0F1115" if accent else colors["text"],
+            relief="flat",
+            bd=0,
+            padx=12,
+            pady=6,
+            cursor="hand2",
+        )
+
+    app_shell = tk.Frame(root, bg=colors["bg"])
     app_shell.pack(expand=True, fill="both")
 
-    content_frame = tk.Frame(app_shell)
+    content_frame = tk.Frame(app_shell, bg=colors["bg"])
     content_frame.pack(side="left", expand=True, fill="both")
 
-    watchlist_frame = tk.Frame(app_shell, bd=1, relief="groove", padx=8, pady=8, width=280)
+    watchlist_frame = tk.Frame(app_shell, bd=1, relief="flat", bg=colors["panel"], highlightthickness=1, highlightbackground=colors["border"], padx=10, pady=10, width=300)
     watchlist_frame.pack(side="right", fill="y")
     watchlist_frame.pack_propagate(False)
 
-    title_label = tk.Label(content_frame, text="Flat tabs: AI, MACD, and RSI", font=("Arial", 13, "bold"))
+    title_label = tk.Label(content_frame, text="Flat tabs: AI, MACD, and RSI", font=("Arial", 13, "bold"), bg=colors["bg"], fg=colors["text"])
     title_label.pack(pady=8)
 
-    market_frame = tk.Frame(content_frame, bd=1, relief="groove", padx=8, pady=6)
+    market_frame = tk.Frame(content_frame, bd=1, relief="flat", bg=colors["panel"], highlightthickness=1, highlightbackground=colors["border"], padx=10, pady=8)
     market_frame.pack(fill="x", padx=10, pady=(0, 6))
 
-    market_title = tk.Label(market_frame, text="S&P 500 Forecast (next 5 trading days)", font=("Arial", 11, "bold"))
+    market_title = tk.Label(market_frame, text="S&P 500 Forecast (next 5 trading days)", font=("Arial", 11, "bold"), bg=colors["panel"], fg=colors["text"])
     market_title.pack(anchor="w")
 
     market_forecast_var = tk.StringVar(value="No S&P 500 forecast data yet. Run a daily scan to generate it.")
-    market_forecast_label = tk.Label(market_frame, textvariable=market_forecast_var, font=("Arial", 10), justify="left", anchor="w")
+    market_forecast_label = tk.Label(market_frame, textvariable=market_forecast_var, font=("Arial", 10), justify="left", anchor="w", bg=colors["panel"], fg=colors["muted"])
     market_forecast_label.pack(fill="x", pady=(2, 0))
 
-    market_tabs_frame = tk.Frame(market_frame)
+    market_tabs_frame = tk.Frame(market_frame, bg=colors["panel"])
     market_tabs_frame.pack(fill="x", pady=(6, 0))
 
     ticker_search_var = tk.StringVar(value="")
-    ticker_search_frame = tk.Frame(content_frame)
+    ticker_search_frame = tk.Frame(content_frame, bg=colors["bg"])
     ticker_search_frame.pack(fill="x", padx=10, pady=(0, 4))
 
-    ticker_search_inner = tk.Frame(ticker_search_frame)
+    ticker_search_inner = tk.Frame(ticker_search_frame, bg=colors["bg"])
     ticker_search_inner.pack(anchor="e")
 
-    ticker_search_label = tk.Label(ticker_search_inner, text="Open ticker:")
+    ticker_search_label = tk.Label(ticker_search_inner, text="Open ticker:", bg=colors["bg"], fg=colors["muted"])
     ticker_search_label.pack(side="left", padx=(0, 6))
 
-    ticker_search_entry = tk.Entry(ticker_search_inner, textvariable=ticker_search_var, width=14)
+    ticker_search_entry = tk.Entry(ticker_search_inner, textvariable=ticker_search_var, width=14, relief="flat", bd=6)
     ticker_search_entry.pack(side="left")
 
     ticker_search_status_var = tk.StringVar(value="")
-    ticker_search_status_label = tk.Label(ticker_search_frame, textvariable=ticker_search_status_var, fg="gray")
+    ticker_search_status_label = tk.Label(ticker_search_frame, textvariable=ticker_search_status_var, fg=colors["muted"], bg=colors["bg"])
     ticker_search_status_label.pack(anchor="e", pady=(2, 0))
 
-    notebook = ttk.Notebook(content_frame)
+    notebook = ttk.Notebook(content_frame, style="Dark.TNotebook")
     notebook.pack(expand=True, fill="both", padx=10, pady=6)
 
     sort_states = {
@@ -236,8 +301,14 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             tk.Button(
                 market_tabs_frame,
                 text=label,
-                relief="sunken" if is_selected else "raised",
+                relief="flat",
+                bd=0,
                 padx=10,
+                pady=4,
+                bg=colors["accent"] if is_selected else colors["panel_soft"],
+                fg="#0F1115" if is_selected else colors["text"],
+                activebackground=colors["accent_hover"],
+                activeforeground="#0F1115",
                 command=lambda d=run_date: on_market_tab_selected(d),
             ).pack(side="left", padx=(0, 6))
 
@@ -248,9 +319,9 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         render_market_forecast(selected.get("forecasts", []) if selected else [])
 
     def build_tree_tab(tab_title, columns, headings, widths):
-        frame = ttk.Frame(notebook)
+        frame = ttk.Frame(notebook, style="Dark.TFrame")
         notebook.add(frame, text=tab_title)
-        tree = ttk.Treeview(frame, columns=columns, show="headings")
+        tree = ttk.Treeview(frame, columns=columns, show="headings", style="Dark.Treeview")
         for col, heading, width in zip(columns, headings, widths):
             tree.heading(col, text=heading)
             tree.column(col, width=width, anchor="center" if col in {"ticker", "percentage", "confidence", "signal_type", "price", "change_pct", "rsi"} else "w")
@@ -282,13 +353,13 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     )
 
     watchlist_items = []
-    watchlist_cards_frame = tk.Frame(watchlist_frame)
+    watchlist_cards_frame = tk.Frame(watchlist_frame, bg=colors["panel"])
     watchlist_cards_frame.pack(expand=True, fill="both", pady=(8, 0))
 
-    watchlist_title = tk.Label(watchlist_frame, text="Watchlist", font=("Arial", 12, "bold"))
+    watchlist_title = tk.Label(watchlist_frame, text="Watchlist", font=("Arial", 12, "bold"), bg=colors["panel"], fg=colors["text"])
     watchlist_title.pack(anchor="w")
 
-    watchlist_hint = tk.Label(watchlist_frame, text="Pinned like TradingView", fg="gray")
+    watchlist_hint = tk.Label(watchlist_frame, text="Pinned like TradingView", fg=colors["muted"], bg=colors["panel"])
     watchlist_hint.pack(anchor="w", pady=(0, 4))
 
     def fetch_watchlist_quote(ticker):
@@ -329,34 +400,34 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             widget.destroy()
 
         if not watchlist_items:
-            tk.Label(watchlist_cards_frame, text="No stocks added yet.\nUse + Add at the top.", fg="gray", justify="left").pack(anchor="w", pady=6)
+            tk.Label(watchlist_cards_frame, text="No stocks added yet.\nUse + Add at the top.", fg=colors["muted"], bg=colors["panel"], justify="left").pack(anchor="w", pady=6)
             return
 
         for item in watchlist_items:
             ticker = item.get("ticker", "")
-            card = tk.Frame(watchlist_cards_frame, bd=1, relief="ridge", padx=6, pady=6)
+            card = tk.Frame(watchlist_cards_frame, bd=1, relief="flat", bg=colors["panel_soft"], highlightthickness=1, highlightbackground=colors["border"], padx=8, pady=8)
             card.pack(fill="x", pady=(0, 6))
 
             name = item.get("name") or get_stock_name_for_ticker(ticker) or "Unknown name"
             ai_5d = get_ai_prediction_for_ticker(ticker)
             live_price, day_change = fetch_watchlist_quote(ticker)
 
-            tk.Label(card, text=ticker, font=("Arial", 11, "bold")).pack(anchor="w")
-            tk.Label(card, text=f"Price: ${live_price:.2f}" if isinstance(live_price, (int, float)) else "Price: --", anchor="w").pack(anchor="w")
+            tk.Label(card, text=ticker, font=("Arial", 11, "bold"), bg=colors["panel_soft"], fg=colors["text"]).pack(anchor="w")
+            tk.Label(card, text=f"Price: ${live_price:.2f}" if isinstance(live_price, (int, float)) else "Price: --", anchor="w", bg=colors["panel_soft"], fg=colors["text"]).pack(anchor="w")
             if isinstance(day_change, (int, float)):
                 change_text = f"Day: {day_change:+.2f}%"
                 change_color = "#2E8B57" if day_change >= 0 else "#C0392B"
-                tk.Label(card, text=change_text, fg=change_color, anchor="w").pack(anchor="w")
+                tk.Label(card, text=change_text, fg=change_color, bg=colors["panel_soft"], anchor="w").pack(anchor="w")
             else:
-                tk.Label(card, text="Day: --", anchor="w").pack(anchor="w")
+                tk.Label(card, text="Day: --", bg=colors["panel_soft"], fg=colors["text"], anchor="w").pack(anchor="w")
 
             if ai_5d is None:
-                tk.Label(card, text="AI 5D: --", anchor="w").pack(anchor="w")
+                tk.Label(card, text="AI 5D: --", bg=colors["panel_soft"], fg=colors["text"], anchor="w").pack(anchor="w")
             else:
                 ai_color = "#2E8B57" if ai_5d >= 0 else "#C0392B"
-                tk.Label(card, text=f"AI 5D: {ai_5d:+.2f}%", fg=ai_color, anchor="w").pack(anchor="w")
+                tk.Label(card, text=f"AI 5D: {ai_5d:+.2f}%", fg=ai_color, bg=colors["panel_soft"], anchor="w").pack(anchor="w")
 
-            tk.Label(card, text=name, fg="gray", font=("Arial", 8)).pack(anchor="w", pady=(4, 0))
+            tk.Label(card, text=name, fg=colors["muted"], bg=colors["panel_soft"], font=("Arial", 8)).pack(anchor="w", pady=(4, 0))
 
             def _open_from_watchlist(_event=None, symbol=ticker):
                 if detail_task_in_progress["value"]:
@@ -383,10 +454,10 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         watchlist_items.append({"ticker": ticker, "name": get_stock_name_for_ticker(ticker)})
         refresh_watchlist_cards()
 
-    add_watchlist_btn = tk.Button(watchlist_frame, text="+ Add", command=add_to_watchlist_from_prompt)
+    add_watchlist_btn = make_button(watchlist_frame, "+ Add", add_to_watchlist_from_prompt, accent=True)
     add_watchlist_btn.pack(anchor="w", pady=(0, 2))
     status_var = tk.StringVar(value="")
-    status_label = tk.Label(content_frame, textvariable=status_var, fg="blue")
+    status_label = tk.Label(content_frame, textvariable=status_var, fg=colors["accent"], bg=colors["bg"])
     status_label.pack(pady=4)
 
     train_status_var = tk.StringVar(value="")
@@ -396,20 +467,20 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     detail_task_in_progress = {"value": False}
     progress_queue = queue.Queue()
 
-    progress_bar = ttk.Progressbar(content_frame, orient="horizontal", mode="determinate", length=700, variable=progress_value)
+    progress_bar = ttk.Progressbar(content_frame, orient="horizontal", mode="determinate", length=700, variable=progress_value, style="Dark.Horizontal.TProgressbar")
     progress_bar.pack(padx=10, pady=6, fill="x")
     progress_bar.pack_forget()
 
-    train_status_label = tk.Label(content_frame, textvariable=train_status_var, fg="green")
+    train_status_label = tk.Label(content_frame, textvariable=train_status_var, fg=colors["success"], bg=colors["bg"])
     train_status_label.pack(pady=2)
 
-    eta_label = tk.Label(content_frame, textvariable=eta_var, fg="gray")
+    eta_label = tk.Label(content_frame, textvariable=eta_var, fg=colors["muted"], bg=colors["bg"])
     eta_label.pack(pady=2)
 
     current_page = {"value": "list"}
     list_page_widgets = []
     list_page_pack_state = {}
-    detail_page = tk.Frame(content_frame)
+    detail_page = tk.Frame(content_frame, bg=colors["bg"])
 
     detail_header_var = tk.StringVar(value="Stock detail")
     detail_summary_var = tk.StringVar(value="")
@@ -417,20 +488,20 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     detail_status_var = tk.StringVar(value="")
     detail_loading_progress = tk.DoubleVar(value=0)
 
-    detail_header_label = tk.Label(detail_page, textvariable=detail_header_var, font=("Arial", 13, "bold"))
+    detail_header_label = tk.Label(detail_page, textvariable=detail_header_var, font=("Arial", 13, "bold"), bg=colors["bg"], fg=colors["text"])
     detail_header_label.pack(anchor="w", padx=10, pady=(10, 6))
 
-    detail_summary_label = tk.Label(detail_page, textvariable=detail_summary_var, justify="left", anchor="w", font=("Arial", 10))
+    detail_summary_label = tk.Label(detail_page, textvariable=detail_summary_var, justify="left", anchor="w", font=("Arial", 10), bg=colors["bg"], fg=colors["text"])
     detail_summary_label.pack(fill="x", padx=10)
 
-    detail_forecast_label = tk.Label(detail_page, textvariable=detail_forecast_var, justify="left", anchor="w", font=("Arial", 10))
+    detail_forecast_label = tk.Label(detail_page, textvariable=detail_forecast_var, justify="left", anchor="w", font=("Arial", 10), bg=colors["bg"], fg=colors["muted"])
     detail_forecast_label.pack(fill="x", padx=10, pady=(6, 10))
 
-    detail_buttons = tk.Frame(detail_page)
+    detail_buttons = tk.Frame(detail_page, bg=colors["bg"])
     detail_buttons.pack(anchor="w", padx=10, pady=(0, 8))
 
     selected_ticker = {"value": None}
-    chart_container = tk.Frame(detail_page)
+    chart_container = tk.Frame(detail_page, bg=colors["panel"])
     chart_container.pack(expand=True, fill="both", padx=10, pady=(2, 10))
     chart_canvas = {"value": None}
 
@@ -441,7 +512,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         for widget in chart_container.winfo_children():
             widget.destroy()
         if message:
-            tk.Label(chart_container, text=message, fg="gray", anchor="w", justify="left").pack(anchor="w")
+            tk.Label(chart_container, text=message, fg=colors["muted"], bg=colors["panel"], anchor="w", justify="left").pack(anchor="w")
 
     def render_detail_chart(payload):
         candles = payload.get("daily_candles", [])
@@ -692,20 +763,20 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         threading.Thread(target=worker, daemon=True).start()
         handle_progress_updates()
 
-    back_btn = tk.Button(detail_buttons, text="← Back to list", command=show_list_page)
+    back_btn = make_button(detail_buttons, "← Back to list", show_list_page)
     back_btn.pack(side="left", padx=(0, 8))
 
-    add_watchlist_detail_btn = tk.Button(detail_buttons, text="+ Add to watchlist", command=add_selected_ticker_to_watchlist)
+    add_watchlist_detail_btn = make_button(detail_buttons, "+ Add to watchlist", add_selected_ticker_to_watchlist)
     add_watchlist_detail_btn.pack(side="left", padx=(0, 8))
 
-    open_tv_btn = tk.Button(
+    open_tv_btn = make_button(
         detail_buttons,
-        text="Open in TradingView",
-        command=lambda: open_tradingview(selected_ticker["value"]) if selected_ticker["value"] else None,
+        "Open in TradingView",
+        lambda: open_tradingview(selected_ticker["value"]) if selected_ticker["value"] else None,
     )
     open_tv_btn.pack(side="left", padx=(0, 8))
 
-    detail_status_label = tk.Label(detail_page, textvariable=detail_status_var, fg="blue", justify="left", anchor="w")
+    detail_status_label = tk.Label(detail_page, textvariable=detail_status_var, fg=colors["accent"], bg=colors["bg"], justify="left", anchor="w")
     detail_status_label.pack(fill="x", padx=10, pady=(0, 6))
 
     detail_loading_bar = ttk.Progressbar(
@@ -714,6 +785,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         mode="indeterminate",
         variable=detail_loading_progress,
         length=520,
+        style="Dark.Horizontal.TProgressbar",
     )
 
     def show_detail_loading_bar():
@@ -780,7 +852,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         ticker_search_status_var.set(f"Loading {ticker}...")
         load_stock_detail(ticker)
 
-    ticker_search_btn = tk.Button(ticker_search_inner, text="Go", command=open_ticker_from_search)
+    ticker_search_btn = make_button(ticker_search_inner, "Go", open_ticker_from_search, accent=True)
     ticker_search_btn.pack(side="left", padx=(6, 0))
 
     ticker_search_entry.bind("<Return>", open_ticker_from_search)
@@ -1033,25 +1105,26 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         threading.Thread(target=worker, daemon=True).start()
         handle_progress_updates()
 
-    button_frame = tk.Frame(content_frame)
+    button_frame = tk.Frame(content_frame, bg=colors["bg"])
     button_frame.pack(pady=6)
 
-    refresh_btn = tk.Button(button_frame, text="Refresh CSV Tabs", command=populate_tables)
+    refresh_btn = make_button(button_frame, "Refresh CSV Tabs", populate_tables, accent=True)
     refresh_btn.pack(side="left", padx=5)
 
-    train_btn = tk.Button(button_frame, text="Train Global Model", command=start_global_training)
+    train_btn = make_button(button_frame, "Train Global Model", start_global_training)
     train_btn.pack(side="left", padx=5)
 
-    run_scan_btn = tk.Button(button_frame, text="Run Daily Scan Now", command=start_manual_scan)
+    run_scan_btn = make_button(button_frame, "Run Daily Scan Now", start_manual_scan)
     run_scan_btn.pack(side="left", padx=5)
 
-    close_btn = tk.Button(button_frame, text="Close", command=root.destroy)
+    close_btn = make_button(button_frame, "Close", root.destroy)
     close_btn.pack(side="left", padx=5)
 
     hint = tk.Label(
         content_frame,
         text="Tip: Daily scan now writes AI (buy_signals.csv), MACD (macd_signals.csv), and RSI (rsi_signals.csv).",
-        fg="gray",
+        fg=colors["muted"],
+        bg=colors["bg"],
     )
     hint.pack(pady=6)
 
