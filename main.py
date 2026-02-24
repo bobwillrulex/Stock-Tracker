@@ -8,6 +8,8 @@ from json import JSONDecodeError
 import time
 from datetime import datetime, timedelta
 import sqlite3
+import random
+import hashlib
 from sklearn.preprocessing import StandardScaler
 
 # ==============================
@@ -59,6 +61,13 @@ FEATURE_COLUMNS = [
     'SR_Confluence',
 ]
 INPUT_SIZE = len(FEATURE_COLUMNS)
+
+
+def _stable_seed(*parts):
+    """Create a deterministic 32-bit seed from arbitrary values."""
+    token = "::".join(str(p) for p in parts)
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16)
 
 
 def _normalize_ohlcv_dataframe(df):
@@ -822,6 +831,14 @@ def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=N
     last_close = float(pd.to_numeric(_normalize_ohlcv_dataframe(ticker_df)["Close"], errors="coerce").iloc[-1])
 
     for horizon in range(1, 6):
+        # Keep per-ticker/per-horizon forecasts stable across repeated UI opens.
+        seed = _stable_seed(symbol, horizon)
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
         X_train, y_train, X_val, y_val, X_pred = process_dataframe(
             ticker_df.copy(), val_split=0.1, target_horizon=horizon
         )
@@ -833,7 +850,14 @@ def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=N
         optimizer = torch.optim.AdamW(model.parameters(), lr=LR_FINE_TUNE, weight_decay=WEIGHT_DECAY)
         loss_fn = nn.MSELoss()
 
-        train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=32, shuffle=True)
+        train_gen = torch.Generator()
+        train_gen.manual_seed(seed)
+        train_loader = DataLoader(
+            TensorDataset(X_train, y_train),
+            batch_size=32,
+            shuffle=True,
+            generator=train_gen,
+        )
         for _ in range(2):
             run_epoch(model, train_loader, optimizer, loss_fn, scaler=None)
 
