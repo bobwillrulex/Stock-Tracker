@@ -763,6 +763,17 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         threading.Thread(target=worker, daemon=True).start()
         handle_progress_updates()
 
+    def add_selected_ticker_to_watchlist():
+        ticker = selected_ticker.get("value")
+        if not ticker:
+            messagebox.showinfo("Watchlist", "Open a stock detail first, then add it.")
+            return
+        if any(item.get("ticker") == ticker for item in watchlist_items):
+            messagebox.showinfo("Watchlist", f"{ticker} is already in your watchlist.")
+            return
+        watchlist_items.append({"ticker": ticker, "name": get_stock_name_for_ticker(ticker)})
+        refresh_watchlist_cards()
+
     back_btn = make_button(detail_buttons, "← Back to list", show_list_page)
     back_btn.pack(side="left", padx=(0, 8))
 
@@ -827,17 +838,6 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     _bind_open_chart(macd_tree, 2)
     _bind_open_chart(rsi_tree, 2)
 
-
-    def add_selected_ticker_to_watchlist():
-        ticker = selected_ticker.get("value")
-        if not ticker:
-            messagebox.showinfo("Watchlist", "Open a stock detail first, then add it.")
-            return
-        if any(item.get("ticker") == ticker for item in watchlist_items):
-            messagebox.showinfo("Watchlist", f"{ticker} is already in your watchlist.")
-            return
-        watchlist_items.append({"ticker": ticker, "name": get_stock_name_for_ticker(ticker)})
-        refresh_watchlist_cards()
 
     def open_ticker_from_search(_event=None):
         if detail_task_in_progress["value"]:
