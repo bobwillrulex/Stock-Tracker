@@ -6,7 +6,8 @@ import os
 import json
 from json import JSONDecodeError
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import sqlite3
 import random
 import hashlib
@@ -36,6 +37,7 @@ MACD_SIGNALS_CSV_PATH = "macd_signals.csv"
 RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
 MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
 MARKET_FORECAST_DB_PATH = "sp500_forecast.db"
+LIVE_SIGNAL_DB_PATH = "live_trading_signals.db"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 print(f"Using device: {DEVICE}")
@@ -966,6 +968,168 @@ def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=N
             "sr_target": float(sr_target) if np.isfinite(sr_target) else None,
             "sr_method": "ai_feature_optimized",
         },
+    }
+
+
+def _ensure_live_signal_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS live_signal_snapshots (
+            ticker TEXT NOT NULL,
+            captured_at_utc TEXT NOT NULL,
+            market_open INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            buy_pct REAL NOT NULL,
+            hold_pct REAL NOT NULL,
+            sell_pct REAL NOT NULL,
+            confidence REAL NOT NULL,
+            current_price REAL,
+            PRIMARY KEY (ticker, captured_at_utc)
+        )
+        """
+    )
+    conn.commit()
+
+
+def is_us_market_open(now_utc=None):
+    """Return True when NYSE/NASDAQ cash market is open (Mon-Fri, 9:30-16:00 ET)."""
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+
+    ny_time = now_utc.astimezone(ZoneInfo("America/New_York"))
+
+    if ny_time.weekday() >= 5:
+        return False
+
+    start = ny_time.replace(hour=9, minute=30, second=0, microsecond=0)
+    end = ny_time.replace(hour=16, minute=0, second=0, microsecond=0)
+    return start <= ny_time <= end
+
+
+def generate_intraday_signal_mix(ticker, period="5d", interval="5m"):
+    """Build a live 5-minute candle signal mix: buy/hold/sell percentages totaling 100."""
+    symbol = str(ticker).strip().upper()
+    if not symbol:
+        raise ValueError("Ticker is required")
+
+    intraday = yf.download(symbol, period=period, interval=interval, progress=False)
+    if intraday is None or intraday.empty:
+        raise ValueError(f"No intraday data available for {symbol}.")
+
+    df = _normalize_ohlcv_dataframe(intraday).copy()
+    close = pd.to_numeric(df.get("Close"), errors="coerce").dropna()
+    if len(close) < 40:
+        raise ValueError(f"Not enough 5-minute candles for {symbol}.")
+
+    ret = close.pct_change()
+    momentum_6 = ret.tail(6).mean()
+    momentum_18 = ret.tail(18).mean()
+    volatility = ret.tail(30).std()
+
+    ema_fast = close.ewm(span=9).mean()
+    ema_slow = close.ewm(span=21).mean()
+    ema_signal = (ema_fast.iloc[-1] - ema_slow.iloc[-1]) / max(close.iloc[-1], 0.01)
+
+    raw_buy = (momentum_6 * 1200.0) + (momentum_18 * 900.0) + (ema_signal * 400.0)
+    raw_sell = (-momentum_6 * 1200.0) + (-momentum_18 * 900.0) + (-ema_signal * 400.0)
+    risk_penalty = float(np.clip((volatility or 0.0) * 1200.0, 0.0, 35.0))
+
+    buy_score = max(raw_buy, 0.0)
+    sell_score = max(raw_sell, 0.0)
+    hold_score = 25.0 + risk_penalty + max(0.0, 10.0 - abs(raw_buy - raw_sell))
+
+    total = max(buy_score + hold_score + sell_score, 1e-9)
+    buy_pct = round((buy_score / total) * 100.0, 1)
+    hold_pct = round((hold_score / total) * 100.0, 1)
+    sell_pct = round((sell_score / total) * 100.0, 1)
+
+    remainder = round(100.0 - (buy_pct + hold_pct + sell_pct), 1)
+    hold_pct = round(hold_pct + remainder, 1)
+
+    action = "HOLD"
+    if buy_pct >= max(hold_pct, sell_pct):
+        action = "BUY"
+    elif sell_pct >= max(hold_pct, buy_pct):
+        action = "SELL"
+
+    confidence = round(max(buy_pct, hold_pct, sell_pct), 1)
+    return {
+        "ticker": symbol,
+        "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+        "market_open": bool(is_us_market_open()),
+        "action": action,
+        "buy_pct": float(buy_pct),
+        "hold_pct": float(hold_pct),
+        "sell_pct": float(sell_pct),
+        "confidence": float(confidence),
+        "current_price": float(close.iloc[-1]),
+        "interval": interval,
+        "period": period,
+    }
+
+
+def save_live_signal_snapshot(snapshot, db_path=LIVE_SIGNAL_DB_PATH):
+    symbol = str(snapshot.get("ticker", "")).strip().upper()
+    captured_at = snapshot.get("captured_at_utc") or datetime.now(timezone.utc).isoformat()
+    if not symbol:
+        raise ValueError("snapshot must include a ticker")
+
+    with sqlite3.connect(db_path) as conn:
+        _ensure_live_signal_table(conn)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO live_signal_snapshots
+            (ticker, captured_at_utc, market_open, action, buy_pct, hold_pct, sell_pct, confidence, current_price)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                symbol,
+                str(captured_at),
+                1 if snapshot.get("market_open") else 0,
+                str(snapshot.get("action", "HOLD")),
+                float(snapshot.get("buy_pct", 0.0)),
+                float(snapshot.get("hold_pct", 0.0)),
+                float(snapshot.get("sell_pct", 0.0)),
+                float(snapshot.get("confidence", 0.0)),
+                float(snapshot.get("current_price")) if snapshot.get("current_price") is not None else None,
+            ),
+        )
+        conn.commit()
+
+
+def load_latest_live_signal_snapshot(ticker, db_path=LIVE_SIGNAL_DB_PATH):
+    symbol = str(ticker).strip().upper()
+    if not symbol:
+        return None
+
+    with sqlite3.connect(db_path) as conn:
+        _ensure_live_signal_table(conn)
+        row = conn.execute(
+            """
+            SELECT ticker, captured_at_utc, market_open, action, buy_pct, hold_pct, sell_pct, confidence, current_price
+            FROM live_signal_snapshots
+            WHERE ticker = ?
+            ORDER BY captured_at_utc DESC
+            LIMIT 1
+            """,
+            (symbol,),
+        ).fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "ticker": row[0],
+        "captured_at_utc": row[1],
+        "market_open": bool(row[2]),
+        "action": row[3],
+        "buy_pct": float(row[4]),
+        "hold_pct": float(row[5]),
+        "sell_pct": float(row[6]),
+        "confidence": float(row[7]),
+        "current_price": float(row[8]) if row[8] is not None else None,
     }
 
 

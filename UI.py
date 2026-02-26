@@ -34,6 +34,7 @@ MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
 WATCHLIST_DB_PATH = "watchlist.db"
 TV_LAYOUT_ID = "ClEM8BLT"
 FORECAST_TABS_DAYS_TO_KEEP = 5
+LIVE_SIGNAL_REFRESH_MS = 5 * 60 * 1000
 
 
 def _ensure_watchlist_table(conn):
@@ -689,8 +690,10 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     detail_header_var = tk.StringVar(value="Stock detail")
     detail_summary_var = tk.StringVar(value="")
     detail_forecast_var = tk.StringVar(value="")
+    detail_live_signal_var = tk.StringVar(value="Live 5m signal: waiting for data...")
     detail_status_var = tk.StringVar(value="")
     detail_loading_progress = tk.DoubleVar(value=0)
+    live_signal_task_in_progress = {"value": False}
 
     detail_header_label = tk.Label(detail_page, textvariable=detail_header_var, font=("Arial", 13, "bold"), bg=colors["bg"], fg=colors["text"])
     detail_header_label.pack(anchor="w", padx=10, pady=(10, 6))
@@ -699,7 +702,10 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     detail_summary_label.pack(fill="x", padx=10)
 
     detail_forecast_label = tk.Label(detail_page, textvariable=detail_forecast_var, justify="left", anchor="w", font=("Arial", 10), bg=colors["bg"], fg=colors["muted"])
-    detail_forecast_label.pack(fill="x", padx=10, pady=(6, 10))
+    detail_forecast_label.pack(fill="x", padx=10, pady=(6, 6))
+
+    detail_live_signal_label = tk.Label(detail_page, textvariable=detail_live_signal_var, justify="left", anchor="w", font=("Arial", 10, "bold"), bg=colors["bg"], fg=colors["accent"])
+    detail_live_signal_label.pack(fill="x", padx=10, pady=(0, 10))
 
     detail_buttons = tk.Frame(detail_page, bg=colors["bg"])
     detail_buttons.pack(anchor="w", padx=10, pady=(0, 8))
@@ -866,6 +872,51 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         tk_canvas.get_tk_widget().pack(expand=True, fill="both")
         chart_canvas["value"] = tk_canvas
 
+    def render_live_signal_snapshot(snapshot):
+        if not snapshot:
+            detail_live_signal_var.set("Live 5m signal: no stored snapshot yet.")
+            return
+
+        buy = float(snapshot.get("buy_pct", 0.0) or 0.0)
+        hold = float(snapshot.get("hold_pct", 0.0) or 0.0)
+        sell = float(snapshot.get("sell_pct", 0.0) or 0.0)
+        action = snapshot.get("action", "HOLD")
+        confidence = float(snapshot.get("confidence", 0.0) or 0.0)
+        captured_at = str(snapshot.get("captured_at_utc", ""))
+        market_open = bool(snapshot.get("market_open", False))
+        state = "market open" if market_open else "market closed"
+        detail_live_signal_var.set(
+            f"Live 5m signal ({state}): BUY {buy:.1f}% | HOLD {hold:.1f}% | SELL {sell:.1f}% "
+            f"→ {action} (conf {confidence:.1f}%) | updated {captured_at}"
+        )
+
+    def refresh_live_signal_for_selected_ticker(force=False):
+        ticker = selected_ticker.get("value")
+        if not ticker:
+            return
+
+        if live_signal_task_in_progress["value"]:
+            return
+
+        if not force and not main.is_us_market_open():
+            cached = main.load_latest_live_signal_snapshot(ticker)
+            render_live_signal_snapshot(cached)
+            root.after(LIVE_SIGNAL_REFRESH_MS, refresh_live_signal_for_selected_ticker)
+            return
+
+        live_signal_task_in_progress["value"] = True
+
+        def worker():
+            try:
+                snapshot = main.generate_intraday_signal_mix(ticker)
+                main.save_live_signal_snapshot(snapshot)
+                progress_queue.put({"stage": "live_signal_loaded", "ticker": ticker, "snapshot": snapshot})
+            except Exception as exc:
+                progress_queue.put({"stage": "live_signal_error", "ticker": ticker, "message": str(exc)})
+
+        threading.Thread(target=worker, daemon=True).start()
+        root.after(LIVE_SIGNAL_REFRESH_MS, refresh_live_signal_for_selected_ticker)
+
     def show_list_page():
         if current_page["value"] == "list":
             return
@@ -943,6 +994,9 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             )
         detail_forecast_var.set("\n".join(day_lines))
         render_detail_chart(payload)
+        cached_snapshot = main.load_latest_live_signal_snapshot(ticker)
+        render_live_signal_snapshot(cached_snapshot)
+        refresh_live_signal_for_selected_ticker(force=True)
         detail_status_var.set("")
         show_detail_page()
 
@@ -953,6 +1007,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         detail_header_var.set(f"{ticker} - loading analysis...")
         detail_summary_var.set("Computing on-demand forecast and trade plan...")
         detail_forecast_var.set("")
+        detail_live_signal_var.set("Live 5m signal: loading...")
         clear_detail_chart("Loading chart data...")
         detail_status_var.set("")
         show_detail_page()
@@ -1221,6 +1276,16 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 detail_task_in_progress["value"] = False
                 render_stock_detail(event.get("payload", {}), event.get("listed_5d_pct"))
                 continue
+            if stage == "live_signal_loaded":
+                live_signal_task_in_progress["value"] = False
+                if event.get("ticker") == selected_ticker.get("value"):
+                    render_live_signal_snapshot(event.get("snapshot"))
+                continue
+            if stage == "live_signal_error":
+                live_signal_task_in_progress["value"] = False
+                if event.get("ticker") == selected_ticker.get("value"):
+                    detail_live_signal_var.set(f"Live 5m signal unavailable: {event.get('message', 'unknown error')}")
+                continue
             if stage == "detail_error":
                 detail_task_in_progress["value"] = False
                 hide_detail_loading_bar()
@@ -1229,6 +1294,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 detail_header_var.set(f"{ticker} - analysis failed")
                 detail_summary_var.set("Could not generate on-demand forecast/trade plan.")
                 detail_forecast_var.set("")
+                detail_live_signal_var.set("Live 5m signal unavailable.")
                 clear_detail_chart("Unable to render chart for this ticker.")
                 detail_status_var.set(message)
                 show_detail_page()
