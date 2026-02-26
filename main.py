@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo
 import sqlite3
 import random
 import hashlib
+import html
+import subprocess
 from sklearn.preprocessing import StandardScaler
 
 # ==============================
@@ -39,6 +41,9 @@ MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
 MARKET_FORECAST_DB_PATH = "sp500_forecast.db"
 LIVE_SIGNAL_DB_PATH = "live_trading_signals.db"
 STOCK_DETAIL_CACHE_DB_PATH = "stock_details_cache.db"
+PAGES_DIR = "docs"
+PAGES_INDEX_PATH = os.path.join(PAGES_DIR, "index.html")
+PAGES_NOJEKYLL_PATH = os.path.join(PAGES_DIR, ".nojekyll")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 print(f"Using device: {DEVICE}")
@@ -301,6 +306,108 @@ def write_technical_signals_csv(macd_signals, rsi_signals):
 
     print(f"Wrote {len(macd_df)} MACD signals to {MACD_SIGNALS_CSV_PATH}.")
     print(f"Wrote {len(rsi_df)} RSI signals to {RSI_SIGNALS_CSV_PATH}.")
+
+
+def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_INDEX_PATH):
+    """Render a simple GitHub Pages report from buy signal CSV data."""
+    os.makedirs(os.path.dirname(output_html), exist_ok=True)
+
+    if os.path.exists(source_csv):
+        report_df = pd.read_csv(source_csv)
+    else:
+        report_df = pd.DataFrame(columns=["stock_name", "ticker", "percentage", "confidence", "marketcap"])
+
+    if not report_df.empty:
+        report_df = report_df.fillna("")
+
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    rows = []
+    for _, row in report_df.iterrows():
+        stock_name = html.escape(str(row.get("stock_name", "")) or "-")
+        ticker = html.escape(str(row.get("ticker", "")) or "-")
+        percentage = html.escape(str(row.get("percentage", "")) or "-")
+        confidence = html.escape(str(row.get("confidence", "")) or "-")
+        marketcap = html.escape(str(row.get("marketcap", "")) or "-")
+        rows.append(
+            f"<tr><td>{stock_name}</td><td>{ticker}</td><td>{percentage}</td><td>{confidence}</td><td>{marketcap}</td></tr>"
+        )
+
+    table_body = "\n".join(rows) if rows else "<tr><td colspan='5'>No recommendations from the latest scan.</td></tr>"
+    html_content = f"""<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <title>Stock Tracker Recommendations</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 2rem; color: #222; }}
+    h1 {{ margin-bottom: 0.5rem; }}
+    .meta {{ color: #555; margin-bottom: 1.5rem; }}
+    table {{ border-collapse: collapse; width: 100%; max-width: 980px; }}
+    th, td {{ border: 1px solid #ddd; padding: 0.7rem; text-align: left; }}
+    th {{ background: #f3f4f6; }}
+    tr:nth-child(even) {{ background: #fafafa; }}
+  </style>
+</head>
+<body>
+  <h1>Recommended Stocks</h1>
+  <p class=\"meta\">Auto-generated from <code>{html.escape(source_csv)}</code> at {generated_at}.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Stock Name</th>
+        <th>Ticker</th>
+        <th>Expected 5D Return</th>
+        <th>Confidence</th>
+        <th>Market Cap</th>
+      </tr>
+    </thead>
+    <tbody>
+      {table_body}
+    </tbody>
+  </table>
+</body>
+</html>
+"""
+
+    with open(output_html, "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    with open(PAGES_NOJEKYLL_PATH, "w", encoding="utf-8") as f:
+        f.write("")
+
+    print(f"GitHub Pages report generated: {output_html}")
+
+
+def auto_commit_and_push_pages(paths_to_commit):
+    """Commit and push generated report files so GitHub Pages updates automatically."""
+    if not os.path.isdir(".git"):
+        return
+
+    auto_push = os.environ.get("STOCK_TRACKER_AUTO_PUSH", "1").lower() in {"1", "true", "yes", "on"}
+    if not auto_push:
+        print("STOCK_TRACKER_AUTO_PUSH disabled; skipping git push.")
+        return
+
+    try:
+        for path in paths_to_commit:
+            subprocess.run(["git", "add", path], check=True)
+
+        status = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"],
+            check=False,
+        )
+        if status.returncode == 0:
+            print("No report changes detected; skipping git commit/push.")
+            return
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        commit_message = f"chore: update stock recommendations ({timestamp})"
+        subprocess.run(["git", "commit", "-m", commit_message], check=True)
+        subprocess.run(["git", "push"], check=True)
+        print("Pushed latest recommendations to GitHub.")
+    except Exception as exc:
+        print(f"Auto push failed: {exc}")
 
 
 def compute_confidence_score(model, X_val, y_val, pred):
@@ -1524,6 +1631,8 @@ def run_daily(tickers=None, progress_callback=None):
     write_buy_signals_csv(buy_signals)
     write_technical_signals_csv(macd_signals, rsi_signals)
     generate_sp500_forecast(base_model_state=base_state)
+    generate_github_pages_report()
+    auto_commit_and_push_pages([SIGNALS_CSV_PATH, PAGES_INDEX_PATH, PAGES_NOJEKYLL_PATH])
     save_state(None)
     print("Daily run complete.")
 
