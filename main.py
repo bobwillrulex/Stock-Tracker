@@ -38,6 +38,7 @@ RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
 MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
 MARKET_FORECAST_DB_PATH = "sp500_forecast.db"
 LIVE_SIGNAL_DB_PATH = "live_trading_signals.db"
+STOCK_DETAIL_CACHE_DB_PATH = "stock_details_cache.db"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 print(f"Using device: {DEVICE}")
@@ -936,8 +937,11 @@ def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=N
     capital_to_use = float(total_capital) * float(allocation_pct)
     shares = int(capital_to_use // max(last_close, 0.01))
 
+    generated_at_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
     return {
         "ticker": symbol,
+        "generated_at_utc": generated_at_utc,
         "current_price": float(last_close),
         "daily_candles": [
             {
@@ -969,6 +973,90 @@ def generate_stock_trade_plan(ticker, total_capital=100000.0, base_model_state=N
             "sr_method": "ai_feature_optimized",
         },
     }
+
+
+def _ensure_stock_detail_cache_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS stock_detail_cache (
+            ticker TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL,
+            generated_at_utc TEXT,
+            updated_at_utc TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+
+
+def save_stock_trade_plan_cache(payload, db_path=STOCK_DETAIL_CACHE_DB_PATH):
+    ticker = str((payload or {}).get("ticker", "")).strip().upper()
+    if not ticker:
+        return False
+
+    now_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    payload_copy = dict(payload)
+    payload_copy["ticker"] = ticker
+    payload_copy["updated_at_utc"] = now_utc
+    payload_json = json.dumps(payload_copy)
+    generated_at_utc = str(payload_copy.get("generated_at_utc", "") or "")
+
+    with sqlite3.connect(db_path) as conn:
+        _ensure_stock_detail_cache_table(conn)
+        conn.execute(
+            """
+            INSERT INTO stock_detail_cache (ticker, payload_json, generated_at_utc, updated_at_utc)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(ticker) DO UPDATE SET
+                payload_json = excluded.payload_json,
+                generated_at_utc = excluded.generated_at_utc,
+                updated_at_utc = excluded.updated_at_utc
+            """,
+            (ticker, payload_json, generated_at_utc, now_utc),
+        )
+        conn.commit()
+    return True
+
+
+def load_stock_trade_plan_cache(ticker, db_path=STOCK_DETAIL_CACHE_DB_PATH):
+    symbol = str(ticker).strip().upper()
+    if not symbol or not os.path.exists(db_path):
+        return None
+
+    with sqlite3.connect(db_path) as conn:
+        _ensure_stock_detail_cache_table(conn)
+        row = conn.execute(
+            """
+            SELECT payload_json
+            FROM stock_detail_cache
+            WHERE ticker = ?
+            LIMIT 1
+            """,
+            (symbol,),
+        ).fetchone()
+
+    if not row:
+        return None
+
+    try:
+        payload = json.loads(row[0])
+    except (TypeError, JSONDecodeError):
+        return None
+
+    if isinstance(payload, dict):
+        payload["ticker"] = symbol
+    return payload
+
+
+def clear_all_stock_trade_plan_cache(db_path=STOCK_DETAIL_CACHE_DB_PATH):
+    if not os.path.exists(db_path):
+        return 0
+
+    with sqlite3.connect(db_path) as conn:
+        _ensure_stock_detail_cache_table(conn)
+        cursor = conn.execute("DELETE FROM stock_detail_cache")
+        conn.commit()
+        return int(cursor.rowcount or 0)
 
 
 def _ensure_live_signal_table(conn):

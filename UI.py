@@ -982,6 +982,9 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             f"Estimated shares (assuming $100,000 capital): {trade_plan.get('shares', 0)}",
             f"Average across days 1-5: {trade_plan.get('avg_predicted_return', 0) * 100:+.2f}% | Avg confidence: {trade_plan.get('avg_confidence', 0) * 100:.1f}%",
         ]
+        generated_at_utc = str(payload.get("generated_at_utc", "") or "").strip()
+        if generated_at_utc:
+            summary_lines.append(f"Analysis generated (UTC): {generated_at_utc}")
         if listed_5d_pct is not None:
             summary_lines.insert(5, f"List view 5-day return: {listed_5d_pct:+.2f}% | Model day-5 return: {model_day5_return_pct:+.2f}%")
         detail_summary_var.set("\n".join(summary_lines))
@@ -1003,19 +1006,33 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     def load_stock_detail(ticker, listed_5d_pct=None):
         detail_task_in_progress["value"] = True
         ticker_search_status_var.set("")
-        show_detail_loading_bar()
-        detail_header_var.set(f"{ticker} - loading analysis...")
-        detail_summary_var.set("Computing on-demand forecast and trade plan...")
-        detail_forecast_var.set("")
-        detail_live_signal_var.set("Live 5m signal: loading...")
-        clear_detail_chart("Loading chart data...")
-        detail_status_var.set("")
-        show_detail_page()
+        cached_payload = main.load_stock_trade_plan_cache(ticker)
+
+        if cached_payload:
+            render_stock_detail(cached_payload, listed_5d_pct=listed_5d_pct)
+            detail_status_var.set("Loaded cached detail instantly. Refreshing with latest market data...")
+        else:
+            show_detail_loading_bar()
+            detail_header_var.set(f"{ticker} - loading analysis...")
+            detail_summary_var.set("Computing on-demand forecast and trade plan...")
+            detail_forecast_var.set("")
+            detail_live_signal_var.set("Live 5m signal: loading...")
+            clear_detail_chart("Loading chart data...")
+            detail_status_var.set("")
+            show_detail_page()
 
         def worker():
             try:
                 payload = main.generate_stock_trade_plan(ticker)
-                progress_queue.put({"stage": "detail_loaded", "payload": payload, "listed_5d_pct": listed_5d_pct})
+                main.save_stock_trade_plan_cache(payload)
+                progress_queue.put(
+                    {
+                        "stage": "detail_loaded",
+                        "payload": payload,
+                        "listed_5d_pct": listed_5d_pct,
+                        "used_cache": bool(cached_payload),
+                    }
+                )
             except Exception as exc:
                 progress_queue.put({"stage": "detail_error", "ticker": ticker, "message": str(exc), "trace": traceback.format_exc()})
 
@@ -1275,6 +1292,8 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
             if stage == "detail_loaded":
                 detail_task_in_progress["value"] = False
                 render_stock_detail(event.get("payload", {}), event.get("listed_5d_pct"))
+                if event.get("used_cache"):
+                    detail_status_var.set("Detail refreshed with latest data.")
                 continue
             if stage == "live_signal_loaded":
                 live_signal_task_in_progress["value"] = False
@@ -1388,6 +1407,22 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
     run_scan_btn = make_button(button_frame, "Run Daily Scan Now", start_manual_scan)
     run_scan_btn.pack(side="left", padx=5)
+
+    def clear_cached_stock_details():
+        if not messagebox.askyesno(
+            "Delete cached stock details",
+            "This will delete all cached individual stock detail data (predictions, stop loss, take profit, chart snapshot).\n\n"
+            "It will NOT delete your trained AI model files or the 5-day list CSV outputs. Continue?",
+            parent=root,
+        ):
+            return
+
+        deleted = main.clear_all_stock_trade_plan_cache()
+        detail_status_var.set(f"Cleared cached stock details for {deleted} ticker(s).")
+        messagebox.showinfo("Cache cleared", f"Deleted cached detail data for {deleted} ticker(s).", parent=root)
+
+    clear_details_btn = make_button(button_frame, "Delete Stock Detail Cache", clear_cached_stock_details)
+    clear_details_btn.pack(side="left", padx=5)
 
     close_btn = make_button(button_frame, "Close", root.destroy)
     close_btn.pack(side="left", padx=5)
