@@ -3,32 +3,160 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Stock Tracker Recommendations</title>
+  <title>Stock Tracker Dashboard</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 2rem; color: #222; }
-    h1 { margin-bottom: 0.5rem; }
-    .meta { color: #555; margin-bottom: 1.5rem; }
-    table { border-collapse: collapse; width: 100%; max-width: 980px; }
-    th, td { border: 1px solid #ddd; padding: 0.7rem; text-align: left; }
-    th { background: #f3f4f6; }
+    :root {
+      --bg: #0b1220;
+      --panel: #121b2d;
+      --panel-soft: #1b2740;
+      --line: #2a3c60;
+      --text: #eef3ff;
+      --muted: #9caece;
+      --accent: #4da3ff;
+      --good: #38d996;
+      --shadow: rgba(5, 10, 20, 0.45);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at 15% -10%, #1c3360 0%, var(--bg) 52%);
+      min-height: 100vh;
+    }
+    .page { max-width: 1360px; margin: 0 auto; padding: 1.5rem; }
+    .header {
+      background: linear-gradient(135deg, rgba(77,163,255,.18), rgba(18,27,45,.85));
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1.2rem 1.4rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 10px 30px var(--shadow);
+    }
+    h1 { margin: 0; font-size: 1.4rem; letter-spacing: .01em; }
+    .meta { margin-top: .45rem; color: var(--muted); font-size: .92rem; }
+    .layout { display: flex; gap: 1rem; align-items: flex-start; }
+    .main { flex: 1 1 auto; min-width: 0; display: grid; gap: 1rem; }
+    .right { width: 340px; max-width: 100%; position: sticky; top: 1rem; }
+    .card {
+      background: linear-gradient(180deg, rgba(27,39,64,.98), rgba(18,27,45,.98));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 1rem;
+      box-shadow: 0 8px 24px var(--shadow);
+    }
+    h2 { margin: 0 0 .8rem 0; font-size: 1.04rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    th, td { border-bottom: 1px solid rgba(156,174,206,.2); padding: .62rem .55rem; text-align: left; }
+    th { color: #d6e4ff; font-weight: 600; user-select: none; }
+    th.sortable { cursor: pointer; }
+    th.sortable::after { content: ' ↕'; color: #84a6df; font-size: .85em; }
+    tr:hover td { background: rgba(77,163,255,.08); }
+    .tv-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+    .tv-link:hover { text-decoration: underline; }
+    .pill { background: rgba(56,217,150,.17); color: var(--good); border: 1px solid rgba(56,217,150,.4); border-radius: 999px; padding: .25rem .55rem; font-size: .75rem; }
+    @media (max-width: 1080px) {
+      .layout { flex-direction: column; }
+      .right { width: 100%; position: static; }
+    }
   </style>
 </head>
 <body>
-  <h1>Recommended Stocks</h1>
-  <p class="meta">No scan report has been generated yet. Run your daily scan to populate this page automatically.</p>
-  <table>
-    <thead>
-      <tr>
-        <th>Stock Name</th>
-        <th>Ticker</th>
-        <th>Expected 5D Return</th>
-        <th>Confidence</th>
-        <th>Market Cap</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr><td colspan="5">No recommendations yet.</td></tr>
-    </tbody>
-  </table>
+  <main class="page">
+    <section class="header">
+      <h1>Stock Tracker Dashboard <span class="pill">TradingView-style</span></h1>
+      <p class="meta">No scan report has been generated yet. Run your daily scan to populate this dashboard. Click any table header to sort by column.</p>
+    </section>
+
+    <section class="layout">
+      <div class="main">
+        <section class="card">
+          <h2>Recommendation List</h2>
+          <table class="sortable-table">
+            <thead>
+              <tr>
+                <th class="sortable">Stock Name</th>
+                <th class="sortable">Ticker</th>
+                <th class="sortable">Expected 5D Return</th>
+                <th class="sortable">Confidence</th>
+                <th class="sortable">Market Cap</th>
+                <th>TradingView</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="6">No recommendations yet.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="card">
+          <h2>Portfolio</h2>
+          <table class="sortable-table">
+            <thead>
+              <tr>
+                <th class="sortable">Ticker</th>
+                <th class="sortable">Shares</th>
+                <th class="sortable">Cost Basis</th>
+                <th class="sortable">Total Cost</th>
+                <th>TradingView</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="5">No portfolio positions yet.</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+
+      <aside class="right">
+        <section class="card">
+          <h2>Watchlist</h2>
+          <table class="sortable-table">
+            <thead>
+              <tr>
+                <th class="sortable">Ticker</th>
+                <th class="sortable">Name</th>
+                <th>TradingView</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="3">No watchlist items yet.</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+      document.querySelectorAll('.sortable-table').forEach((table) => {
+        const headers = table.querySelectorAll('th.sortable');
+        headers.forEach((header, index) => {
+          let asc = false;
+          header.addEventListener('click', () => {
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            asc = !asc;
+            rows.sort((a, b) => {
+              const aCell = a.children[index];
+              const bCell = b.children[index];
+              const aVal = aCell?.getAttribute('data-sort-value') ?? aCell?.innerText ?? '';
+              const bVal = bCell?.getAttribute('data-sort-value') ?? bCell?.innerText ?? '';
+
+              const aNum = Number(aVal.replace(/[^0-9+-.]/g, ''));
+              const bNum = Number(bVal.replace(/[^0-9+-.]/g, ''));
+              if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && aVal.trim() !== '' && bVal.trim() !== '') {
+                return asc ? aNum - bNum : bNum - aNum;
+              }
+              return asc ? collator.compare(aVal, bVal) : collator.compare(bVal, aVal);
+            });
+            rows.forEach((row) => tbody.appendChild(row));
+          });
+        });
+      });
+    })();
+  </script>
 </body>
 </html>
