@@ -308,8 +308,93 @@ def write_technical_signals_csv(macd_signals, rsi_signals):
     print(f"Wrote {len(rsi_df)} RSI signals to {RSI_SIGNALS_CSV_PATH}.")
 
 
+def _load_watchlist_rows(path="watchlist.db"):
+    if not os.path.exists(path):
+        return []
+
+    try:
+        with sqlite3.connect(path) as conn:
+            rows = conn.execute(
+                "SELECT ticker, stock_name, created_at FROM watchlist ORDER BY created_at ASC"
+            ).fetchall()
+    except Exception:
+        return []
+
+    return [
+        {
+            "ticker": str(ticker or "").upper(),
+            "stock_name": str(stock_name or ""),
+            "created_at": str(created_at or ""),
+        }
+        for ticker, stock_name, created_at in rows
+        if str(ticker or "").strip()
+    ]
+
+
+def _load_portfolio_rows(path="portfolio.db"):
+    if not os.path.exists(path):
+        return []
+
+    try:
+        with sqlite3.connect(path) as conn:
+            rows = conn.execute(
+                """
+                SELECT ticker, shares, cost_basis, created_at
+                FROM portfolio_positions
+                ORDER BY created_at DESC
+                """
+            ).fetchall()
+    except Exception:
+        return []
+
+    payload = []
+    for ticker, shares, cost_basis, created_at in rows:
+        symbol = str(ticker or "").upper().strip()
+        if not symbol:
+            continue
+        qty = float(shares or 0)
+        basis = float(cost_basis or 0)
+        total_cost = qty * basis
+        payload.append(
+            {
+                "ticker": symbol,
+                "shares": round(qty, 4),
+                "cost_basis": round(basis, 4),
+                "position_cost": round(total_cost, 2),
+                "created_at": str(created_at or ""),
+            }
+        )
+    return payload
+
+
+def _to_tv_symbol(ticker):
+    symbol = str(ticker or "").upper().strip()
+    if not symbol:
+        return ""
+    if symbol.endswith(".TO"):
+        return f"TSX:{symbol[:-3]}"
+    return symbol
+
+
+def _format_market_cap(value):
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return "-"
+
+    if n >= 1e12:
+        return f"${n / 1e12:.2f}T"
+    if n >= 1e9:
+        return f"${n / 1e9:.2f}B"
+    if n >= 1e6:
+        return f"${n / 1e6:.2f}M"
+    if n >= 1e3:
+        return f"${n / 1e3:.2f}K"
+    return f"${n:.0f}"
+
+
 def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_INDEX_PATH):
-    """Render a simple GitHub Pages report from buy signal CSV data."""
+    """Render a modern, sortable GitHub Pages dashboard from local signal/watchlist data."""
     os.makedirs(os.path.dirname(output_html), exist_ok=True)
 
     if os.path.exists(source_csv):
@@ -318,54 +403,235 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
         report_df = pd.DataFrame(columns=["stock_name", "ticker", "percentage", "confidence", "marketcap"])
 
     if not report_df.empty:
-        report_df = report_df.fillna("")
+        report_df = report_df.fillna("").sort_values(by="marketcap", ascending=False)
+
+    watchlist_rows = _load_watchlist_rows()
+    portfolio_rows = _load_portfolio_rows()
 
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     rows = []
     for _, row in report_df.iterrows():
         stock_name = html.escape(str(row.get("stock_name", "")) or "-")
         ticker = html.escape(str(row.get("ticker", "")) or "-")
-        percentage = html.escape(str(row.get("percentage", "")) or "-")
-        confidence = html.escape(str(row.get("confidence", "")) or "-")
-        marketcap = html.escape(str(row.get("marketcap", "")) or "-")
+        percentage = float(pd.to_numeric(row.get("percentage", 0), errors="coerce") or 0)
+        confidence = float(pd.to_numeric(row.get("confidence", 0), errors="coerce") or 0)
+        marketcap_num = float(pd.to_numeric(row.get("marketcap", 0), errors="coerce") or 0)
+        tv_symbol = _to_tv_symbol(ticker)
+        trading_view_link = (
+            f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}' target='_blank' rel='noopener noreferrer'>Open ↗</a>"
+            if tv_symbol
+            else "-"
+        )
         rows.append(
-            f"<tr><td>{stock_name}</td><td>{ticker}</td><td>{percentage}</td><td>{confidence}</td><td>{marketcap}</td></tr>"
+            """
+            <tr>
+              <td>{stock_name}</td>
+              <td>{ticker}</td>
+              <td data-sort-value="{percentage:.4f}">{percentage:+.2f}%</td>
+              <td data-sort-value="{confidence:.4f}">{confidence:.2f}%</td>
+              <td data-sort-value="{marketcap_num:.0f}">{marketcap}</td>
+              <td>{trading_view_link}</td>
+            </tr>
+            """.format(
+                stock_name=stock_name,
+                ticker=ticker,
+                percentage=percentage,
+                confidence=confidence,
+                marketcap_num=marketcap_num,
+                marketcap=html.escape(_format_market_cap(marketcap_num)),
+                trading_view_link=trading_view_link,
+            )
         )
 
-    table_body = "\n".join(rows) if rows else "<tr><td colspan='5'>No recommendations from the latest scan.</td></tr>"
+    table_body = "\n".join(rows) if rows else "<tr><td colspan='6'>No recommendations from the latest scan.</td></tr>"
+
+    watchlist_html_rows = []
+    for row in watchlist_rows:
+        ticker = html.escape(row["ticker"])
+        name = html.escape(row["stock_name"] or "-")
+        tv_symbol = _to_tv_symbol(row["ticker"])
+        trading_view_link = (
+            f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}' target='_blank' rel='noopener noreferrer'>Chart ↗</a>"
+            if tv_symbol
+            else "-"
+        )
+        watchlist_html_rows.append(f"<tr><td>{ticker}</td><td>{name}</td><td>{trading_view_link}</td></tr>")
+    watchlist_body = "\n".join(watchlist_html_rows) if watchlist_html_rows else "<tr><td colspan='3'>No watchlist items yet.</td></tr>"
+
+    portfolio_html_rows = []
+    for row in portfolio_rows:
+        ticker = html.escape(row["ticker"])
+        tv_symbol = _to_tv_symbol(row["ticker"])
+        trading_view_link = (
+            f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}' target='_blank' rel='noopener noreferrer'>Chart ↗</a>"
+            if tv_symbol
+            else "-"
+        )
+        portfolio_html_rows.append(
+            f"<tr><td>{ticker}</td><td data-sort-value='{row['shares']:.4f}'>{row['shares']:.4f}</td><td data-sort-value='{row['cost_basis']:.4f}'>${row['cost_basis']:.2f}</td><td data-sort-value='{row['position_cost']:.2f}'>${row['position_cost']:.2f}</td><td>{trading_view_link}</td></tr>"
+        )
+    portfolio_body = "\n".join(portfolio_html_rows) if portfolio_html_rows else "<tr><td colspan='5'>No portfolio positions yet.</td></tr>"
+
     html_content = f"""<!doctype html>
 <html lang=\"en\">
 <head>
   <meta charset=\"utf-8\" />
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-  <title>Stock Tracker Recommendations</title>
+  <title>Stock Tracker Dashboard</title>
   <style>
-    body {{ font-family: Arial, sans-serif; margin: 2rem; color: #222; }}
-    h1 {{ margin-bottom: 0.5rem; }}
-    .meta {{ color: #555; margin-bottom: 1.5rem; }}
-    table {{ border-collapse: collapse; width: 100%; max-width: 980px; }}
-    th, td {{ border: 1px solid #ddd; padding: 0.7rem; text-align: left; }}
-    th {{ background: #f3f4f6; }}
-    tr:nth-child(even) {{ background: #fafafa; }}
+    :root {{
+      --bg: #0b1220;
+      --panel: #121b2d;
+      --panel-soft: #1b2740;
+      --line: #2a3c60;
+      --text: #eef3ff;
+      --muted: #9caece;
+      --accent: #4da3ff;
+      --good: #38d996;
+      --shadow: rgba(5, 10, 20, 0.45);
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at 15% -10%, #1c3360 0%, var(--bg) 52%);
+      min-height: 100vh;
+    }}
+    .page {{ max-width: 1360px; margin: 0 auto; padding: 1.5rem; }}
+    .header {{
+      background: linear-gradient(135deg, rgba(77,163,255,.18), rgba(18,27,45,.85));
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1.2rem 1.4rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 10px 30px var(--shadow);
+    }}
+    h1 {{ margin: 0; font-size: 1.4rem; letter-spacing: .01em; }}
+    .meta {{ margin-top: .45rem; color: var(--muted); font-size: .92rem; }}
+    .layout {{ display: flex; gap: 1rem; align-items: flex-start; }}
+    .main {{ flex: 1 1 auto; min-width: 0; display: grid; gap: 1rem; }}
+    .right {{ width: 340px; max-width: 100%; position: sticky; top: 1rem; }}
+    .card {{
+      background: linear-gradient(180deg, rgba(27,39,64,.98), rgba(18,27,45,.98));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 1rem;
+      box-shadow: 0 8px 24px var(--shadow);
+    }}
+    h2 {{ margin: 0 0 .8rem 0; font-size: 1.04rem; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: .92rem; }}
+    th, td {{ border-bottom: 1px solid rgba(156,174,206,.2); padding: .62rem .55rem; text-align: left; }}
+    th {{ color: #d6e4ff; font-weight: 600; user-select: none; }}
+    th.sortable {{ cursor: pointer; }}
+    th.sortable::after {{ content: ' ↕'; color: #84a6df; font-size: .85em; }}
+    tr:hover td {{ background: rgba(77,163,255,.08); }}
+    .tv-link {{ color: var(--accent); text-decoration: none; font-weight: 600; }}
+    .tv-link:hover {{ text-decoration: underline; }}
+    .pill {{ background: rgba(56,217,150,.17); color: var(--good); border: 1px solid rgba(56,217,150,.4); border-radius: 999px; padding: .25rem .55rem; font-size: .75rem; }}
+    @media (max-width: 1080px) {{
+      .layout {{ flex-direction: column; }}
+      .right {{ width: 100%; position: static; }}
+    }}
   </style>
 </head>
 <body>
-  <h1>Recommended Stocks</h1>
-  <p class=\"meta\">Auto-generated from <code>{html.escape(source_csv)}</code> at {generated_at}.</p>
-  <table>
-    <thead>
-      <tr>
-        <th>Stock Name</th>
-        <th>Ticker</th>
-        <th>Expected 5D Return</th>
-        <th>Confidence</th>
-        <th>Market Cap</th>
-      </tr>
-    </thead>
-    <tbody>
-      {table_body}
-    </tbody>
-  </table>
+  <main class=\"page\">
+    <section class=\"header\">
+      <h1>Stock Tracker Dashboard <span class=\"pill\">TradingView-style</span></h1>
+      <p class=\"meta\">Auto-generated from <code>{html.escape(source_csv)}</code> at {generated_at}. Click any table header to sort by column.</p>
+    </section>
+
+    <section class=\"layout\">
+      <div class=\"main\">
+        <section class=\"card\">
+          <h2>Recommendation List</h2>
+          <table class=\"sortable-table\">
+            <thead>
+              <tr>
+                <th class=\"sortable\">Stock Name</th>
+                <th class=\"sortable\">Ticker</th>
+                <th class=\"sortable\">Expected 5D Return</th>
+                <th class=\"sortable\">Confidence</th>
+                <th class=\"sortable\">Market Cap</th>
+                <th>TradingView</th>
+              </tr>
+            </thead>
+            <tbody>
+              {table_body}
+            </tbody>
+          </table>
+        </section>
+
+        <section class=\"card\">
+          <h2>Portfolio</h2>
+          <table class=\"sortable-table\">
+            <thead>
+              <tr>
+                <th class=\"sortable\">Ticker</th>
+                <th class=\"sortable\">Shares</th>
+                <th class=\"sortable\">Cost Basis</th>
+                <th class=\"sortable\">Total Cost</th>
+                <th>TradingView</th>
+              </tr>
+            </thead>
+            <tbody>
+              {portfolio_body}
+            </tbody>
+          </table>
+        </section>
+      </div>
+
+      <aside class=\"right\">
+        <section class=\"card\">
+          <h2>Watchlist</h2>
+          <table class=\"sortable-table\">
+            <thead>
+              <tr>
+                <th class=\"sortable\">Ticker</th>
+                <th class=\"sortable\">Name</th>
+                <th>TradingView</th>
+              </tr>
+            </thead>
+            <tbody>
+              {watchlist_body}
+            </tbody>
+          </table>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    (function () {{
+      const collator = new Intl.Collator(undefined, {{ numeric: true, sensitivity: 'base' }});
+      document.querySelectorAll('.sortable-table').forEach((table) => {{
+        const headers = table.querySelectorAll('th.sortable');
+        headers.forEach((header, index) => {{
+          let asc = false;
+          header.addEventListener('click', () => {{
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            asc = !asc;
+            rows.sort((a, b) => {{
+              const aCell = a.children[index];
+              const bCell = b.children[index];
+              const aVal = aCell?.getAttribute('data-sort-value') ?? aCell?.innerText ?? '';
+              const bVal = bCell?.getAttribute('data-sort-value') ?? bCell?.innerText ?? '';
+
+              const aNum = Number(aVal.replace(/[^0-9+-.]/g, ''));
+              const bNum = Number(bVal.replace(/[^0-9+-.]/g, ''));
+              if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && aVal.trim() !== '' && bVal.trim() !== '') {{
+                return asc ? aNum - bNum : bNum - aNum;
+              }}
+              return asc ? collator.compare(aVal, bVal) : collator.compare(bVal, aVal);
+            }});
+            rows.forEach((row) => tbody.appendChild(row));
+          }});
+        }});
+      }});
+    }})();
+  </script>
 </body>
 </html>
 """
