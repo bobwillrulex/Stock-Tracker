@@ -35,6 +35,7 @@ WATCHLIST_DB_PATH = "watchlist.db"
 TV_LAYOUT_ID = "ClEM8BLT"
 FORECAST_TABS_DAYS_TO_KEEP = 5
 LIVE_SIGNAL_REFRESH_MS = 5 * 60 * 1000
+PORTFOLIO_DB_PATH = "portfolio.db"
 
 
 def _ensure_watchlist_table(conn):
@@ -106,6 +107,87 @@ def open_tradingview(ticker):
 
     url = f"https://www.tradingview.com/chart/{TV_LAYOUT_ID}/?symbol={tv_symbol}"
     webbrowser.open(url)
+
+
+def _ensure_portfolio_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_positions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            shares REAL NOT NULL,
+            cost_basis REAL NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.commit()
+
+
+def load_portfolio_positions(path=PORTFOLIO_DB_PATH):
+    try:
+        with sqlite3.connect(path) as conn:
+            _ensure_portfolio_table(conn)
+            rows = conn.execute(
+                "SELECT id, ticker, shares, cost_basis FROM portfolio_positions ORDER BY created_at DESC"
+            ).fetchall()
+        return [
+            {
+                "id": row_id,
+                "ticker": str(ticker or "").upper(),
+                "shares": float(shares or 0),
+                "cost_basis": float(cost_basis or 0),
+            }
+            for row_id, ticker, shares, cost_basis in rows
+        ]
+    except Exception:
+        return []
+
+
+def insert_portfolio_position(ticker, shares, cost_basis, path=PORTFOLIO_DB_PATH):
+    symbol = normalize_ticker_input(ticker)
+    if not symbol:
+        raise ValueError("Ticker is required.")
+
+    qty = float(shares)
+    if qty <= 0:
+        raise ValueError("Shares must be greater than 0.")
+
+    basis = float(cost_basis)
+    if basis <= 0:
+        raise ValueError("Cost basis must be greater than 0.")
+
+    with sqlite3.connect(path) as conn:
+        _ensure_portfolio_table(conn)
+        conn.execute(
+            "INSERT INTO portfolio_positions (ticker, shares, cost_basis) VALUES (?, ?, ?)",
+            (symbol, qty, basis),
+        )
+        conn.commit()
+
+
+def delete_portfolio_position(position_id, path=PORTFOLIO_DB_PATH):
+    with sqlite3.connect(path) as conn:
+        _ensure_portfolio_table(conn)
+        conn.execute("DELETE FROM portfolio_positions WHERE id = ?", (position_id,))
+        conn.commit()
+
+
+def score_to_action(score):
+    if score >= 67:
+        return "BUY"
+    if score <= 33:
+        return "SELL"
+    return "HOLD"
+
+
+def compute_recommendation_score(pnl_percent, ai_prediction_percent=None):
+    momentum_component = max(min((pnl_percent + 15.0) / 30.0, 1.0), 0.0) * 60.0
+    if ai_prediction_percent is None:
+        ai_component = 20.0
+    else:
+        ai_component = max(min((ai_prediction_percent + 10.0) / 20.0, 1.0), 0.0) * 40.0
+    return max(min(momentum_component + ai_component, 100.0), 0.0)
 
 
 def normalize_ticker_input(raw_ticker):
@@ -428,6 +510,63 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         (90, 330, 120, 110, 160),
     )
 
+    portfolio_tab = ttk.Frame(notebook, style="Dark.TFrame")
+    notebook.add(portfolio_tab, text="💼 Portfolio")
+
+    portfolio_form = tk.Frame(portfolio_tab, bg=colors["bg"])
+    portfolio_form.pack(fill="x", padx=10, pady=(10, 6))
+
+    tk.Label(portfolio_form, text="Ticker", bg=colors["bg"], fg=colors["muted"]).grid(row=0, column=0, sticky="w")
+    tk.Label(portfolio_form, text="Position (shares)", bg=colors["bg"], fg=colors["muted"]).grid(row=0, column=1, sticky="w", padx=(10, 0))
+    tk.Label(portfolio_form, text="Cost basis ($)", bg=colors["bg"], fg=colors["muted"]).grid(row=0, column=2, sticky="w", padx=(10, 0))
+
+    portfolio_ticker_var = tk.StringVar(value="")
+    portfolio_shares_var = tk.StringVar(value="")
+    portfolio_cost_var = tk.StringVar(value="")
+    portfolio_status_var = tk.StringVar(value="")
+
+    tk.Entry(portfolio_form, textvariable=portfolio_ticker_var, width=12, relief="flat", bd=6).grid(row=1, column=0, sticky="w")
+    tk.Entry(portfolio_form, textvariable=portfolio_shares_var, width=14, relief="flat", bd=6).grid(row=1, column=1, sticky="w", padx=(10, 0))
+    tk.Entry(portfolio_form, textvariable=portfolio_cost_var, width=14, relief="flat", bd=6).grid(row=1, column=2, sticky="w", padx=(10, 0))
+
+    portfolio_rows = {"items": []}
+
+    portfolio_columns = (
+        "id",
+        "ticker",
+        "stock_name",
+        "shares",
+        "cost_basis",
+        "price",
+        "pnl",
+        "pnl_pct",
+        "signal",
+    )
+    portfolio_tree = ttk.Treeview(portfolio_tab, columns=portfolio_columns, show="headings", style="Dark.Treeview")
+    portfolio_tree.heading("id", text="ID")
+    portfolio_tree.heading("ticker", text="Ticker")
+    portfolio_tree.heading("stock_name", text="Stock")
+    portfolio_tree.heading("shares", text="Position")
+    portfolio_tree.heading("cost_basis", text="Cost")
+    portfolio_tree.heading("price", text="Price")
+    portfolio_tree.heading("pnl", text="Current P&L")
+    portfolio_tree.heading("pnl_pct", text="P&L %")
+    portfolio_tree.heading("signal", text="Signal /100")
+
+    portfolio_tree.column("id", width=45, anchor="center")
+    portfolio_tree.column("ticker", width=90, anchor="center")
+    portfolio_tree.column("stock_name", width=220, anchor="w")
+    portfolio_tree.column("shares", width=90, anchor="e")
+    portfolio_tree.column("cost_basis", width=90, anchor="e")
+    portfolio_tree.column("price", width=90, anchor="e")
+    portfolio_tree.column("pnl", width=120, anchor="e")
+    portfolio_tree.column("pnl_pct", width=90, anchor="e")
+    portfolio_tree.column("signal", width=130, anchor="center")
+    portfolio_tree.pack(expand=True, fill="both", padx=10, pady=(0, 8))
+
+    portfolio_status_label = tk.Label(portfolio_tab, textvariable=portfolio_status_var, fg=colors["muted"], bg=colors["bg"], anchor="w")
+    portfolio_status_label.pack(fill="x", padx=10, pady=(0, 10))
+
     watchlist_items = load_watchlist_items()
     watchlist_prediction_cache = {}
     watchlist_prediction_in_flight = set()
@@ -475,6 +614,112 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 if str(row.get("ticker", "")).upper() == ticker:
                     return row.get("stock_name", "")
         return ""
+
+    def refresh_portfolio_table():
+        portfolio_rows["items"] = load_portfolio_positions()
+        for item_id in portfolio_tree.get_children():
+            portfolio_tree.delete(item_id)
+
+        if not portfolio_rows["items"]:
+            portfolio_status_var.set("No positions yet. Add one above to get buy/sell/hold guidance.")
+            return
+
+        for pos in portfolio_rows["items"]:
+            ticker = pos.get("ticker", "")
+            name = get_stock_name_for_ticker(ticker) or ticker
+            price, _ = fetch_watchlist_quote(ticker)
+            shares = float(pos.get("shares", 0) or 0)
+            cost_basis = float(pos.get("cost_basis", 0) or 0)
+            total_cost = shares * cost_basis
+
+            if isinstance(price, (int, float)):
+                current_value = shares * float(price)
+                pnl = current_value - total_cost
+                pnl_pct = (pnl / total_cost * 100.0) if total_cost else 0.0
+                ai_prediction = get_ai_prediction_for_ticker(ticker)
+                score = compute_recommendation_score(pnl_pct, ai_prediction)
+                action = score_to_action(score)
+                signal_text = f"{action} {score:.0f}/100"
+                price_text = f"${price:.2f}"
+                pnl_text = f"${pnl:+.2f}"
+                pnl_pct_text = f"{pnl_pct:+.2f}%"
+            else:
+                price_text = "--"
+                pnl_text = "--"
+                pnl_pct_text = "--"
+                signal_text = "HOLD 50/100"
+
+            portfolio_tree.insert(
+                "",
+                "end",
+                values=(
+                    pos.get("id"),
+                    ticker,
+                    name,
+                    f"{shares:.4f}",
+                    f"${cost_basis:.2f}",
+                    price_text,
+                    pnl_text,
+                    pnl_pct_text,
+                    signal_text,
+                ),
+            )
+
+        portfolio_status_var.set(
+            "Signal score blends current P&L momentum + AI 5-day forecast. 0 = strong sell, 100 = strong buy."
+        )
+
+    def add_portfolio_position():
+        try:
+            insert_portfolio_position(
+                portfolio_ticker_var.get(),
+                portfolio_shares_var.get(),
+                portfolio_cost_var.get(),
+            )
+        except ValueError as exc:
+            portfolio_status_var.set(str(exc))
+            return
+        except Exception as exc:
+            portfolio_status_var.set(f"Unable to save position: {exc}")
+            return
+
+        portfolio_ticker_var.set("")
+        portfolio_shares_var.set("")
+        portfolio_cost_var.set("")
+        refresh_portfolio_table()
+
+    def remove_selected_portfolio_position():
+        selected = portfolio_tree.selection()
+        if not selected:
+            portfolio_status_var.set("Select a portfolio row to delete.")
+            return
+
+        values = portfolio_tree.item(selected[0]).get("values", [])
+        if not values:
+            portfolio_status_var.set("Could not read selected portfolio row.")
+            return
+
+        try:
+            delete_portfolio_position(int(values[0]))
+        except Exception as exc:
+            portfolio_status_var.set(f"Unable to delete position: {exc}")
+            return
+
+        refresh_portfolio_table()
+
+    portfolio_button_row = tk.Frame(portfolio_form, bg=colors["bg"])
+    portfolio_button_row.grid(row=1, column=3, padx=(10, 0), sticky="w")
+
+    add_position_btn = make_button(portfolio_button_row, "Add Position", add_portfolio_position, accent=True)
+    add_position_btn.pack(side="left")
+
+    delete_position_btn = make_button(portfolio_button_row, "Delete Selected", remove_selected_portfolio_position)
+    delete_position_btn.pack(side="left", padx=(6, 0))
+
+    portfolio_ticker_var_entry_bind = lambda _event=None: add_portfolio_position()
+    for entry_widget in portfolio_form.winfo_children():
+        if isinstance(entry_widget, tk.Entry):
+            entry_widget.bind("<Return>", portfolio_ticker_var_entry_bind)
 
     def get_ai_prediction_for_ticker(ticker):
         for row in rows_store.get("ai", []):
@@ -1235,6 +1480,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         rerender_table("macd")
         rerender_table("rsi")
         refresh_watchlist_cards()
+        refresh_portfolio_table()
 
         total_market_rows = sum(len(item.get("forecasts", [])) for item in market_history_rows)
         status_var.set(
