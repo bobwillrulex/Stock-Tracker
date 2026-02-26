@@ -1279,7 +1279,15 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                     }
                 )
             except Exception as exc:
-                progress_queue.put({"stage": "detail_error", "ticker": ticker, "message": str(exc), "trace": traceback.format_exc()})
+                progress_queue.put(
+                    {
+                        "stage": "detail_error",
+                        "ticker": ticker,
+                        "message": str(exc),
+                        "trace": traceback.format_exc(),
+                        "had_cached_payload": bool(cached_payload),
+                    }
+                )
 
         threading.Thread(target=worker, daemon=True).start()
         handle_progress_updates()
@@ -1556,6 +1564,12 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
                 hide_detail_loading_bar()
                 ticker = event.get("ticker", "")
                 message = event.get("message", "Unknown error")
+                if event.get("had_cached_payload") and ticker == selected_ticker.get("value"):
+                    detail_status_var.set(
+                        f"Live refresh failed, showing cached analysis instead. Reason: {message}"
+                    )
+                    print(event.get("trace", ""))
+                    continue
                 detail_header_var.set(f"{ticker} - analysis failed")
                 detail_summary_var.set("Could not generate on-demand forecast/trade plan.")
                 detail_forecast_var.set("")
