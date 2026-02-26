@@ -369,6 +369,16 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     app_shell = tk.Frame(root, bg=colors["bg"])
     app_shell.pack(expand=True, fill="both")
 
+    last_updated_var = tk.StringVar(value="Last updated at: --")
+    last_updated_label = tk.Label(
+        app_shell,
+        textvariable=last_updated_var,
+        fg=colors["muted"],
+        bg=colors["bg"],
+        anchor="e",
+    )
+    last_updated_label.pack(side="bottom", fill="x", padx=12, pady=(0, 8))
+
     content_frame = tk.Frame(app_shell, bg=colors["bg"])
     content_frame.pack(side="left", expand=True, fill="both")
 
@@ -1497,6 +1507,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         status_var.set(
             f"Loaded AI={len(rows_store['ai'])}, MACD={len(rows_store['macd'])}, RSI={len(rows_store['rsi'])}, S&P forecast rows={total_market_rows}. Double-click any row to open on-demand stock analysis."
         )
+        last_updated_var.set(f"Last updated at: {datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')}")
 
     bind_sorting(ai_tree, "ai", ("percentage", "confidence", "ticker", "marketcap"))
     bind_sorting(macd_tree, "macd", ("ticker", "marketcap"))

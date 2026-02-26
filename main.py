@@ -407,6 +407,7 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
 
     watchlist_rows = _load_watchlist_rows()
     portfolio_rows = _load_portfolio_rows()
+    market_history_rows = load_recent_sp500_forecast_history(days_to_keep=5)
 
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     rows = []
@@ -472,6 +473,25 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
         )
     portfolio_body = "\n".join(portfolio_html_rows) if portfolio_html_rows else "<tr><td colspan='5'>No portfolio positions yet.</td></tr>"
 
+    day_labels = {1: "Tomorrow", 2: "2 days", 3: "3 days", 4: "4 days", 5: "5 days"}
+    market_history_payload = []
+    for entry in market_history_rows:
+        run_date = str(entry.get("run_date", "") or "")
+        if not run_date:
+            continue
+        forecasts = []
+        for row in sorted(entry.get("forecasts", []), key=lambda item: int(item.get("day", 0))):
+            day = int(row.get("day", 0))
+            forecasts.append({
+                "day": day,
+                "percentage": float(row.get("percentage", 0) or 0),
+                "confidence": float(row.get("confidence", 0) or 0),
+                "label": day_labels.get(day, f"{day} days"),
+            })
+        market_history_payload.append({"run_date": run_date, "forecasts": forecasts})
+
+    market_history_json = json.dumps(market_history_payload)
+
     html_content = f"""<!doctype html>
 <html lang=\"en\">
 <head>
@@ -529,6 +549,11 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
     .tv-link {{ color: var(--accent); text-decoration: none; font-weight: 600; }}
     .tv-link:hover {{ text-decoration: underline; }}
     .pill {{ background: rgba(56,217,150,.17); color: var(--good); border: 1px solid rgba(56,217,150,.4); border-radius: 999px; padding: .25rem .55rem; font-size: .75rem; }}
+    .forecast-text {{ color: var(--muted); font-size: .94rem; line-height: 1.5; margin: .3rem 0 0 0; }}
+    .forecast-tabs {{ display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .75rem; }}
+    .forecast-tab {{ border: 1px solid var(--line); border-radius: 999px; background: var(--panel-soft); color: var(--text); padding: .2rem .65rem; font-size: .78rem; cursor: pointer; }}
+    .forecast-tab.active {{ border-color: var(--accent); color: var(--accent); }}
+    .footer {{ color: var(--muted); font-size: .86rem; text-align: right; margin-top: 1rem; }}
     @media (max-width: 1080px) {{
       .layout {{ flex-direction: column; }}
       .right {{ width: 100%; position: static; }}
@@ -544,6 +569,12 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
 
     <section class=\"layout\">
       <div class=\"main\">
+        <section class=\"card\">
+          <h2>S&amp;P 500 Forecast (next 5 trading days)</h2>
+          <p id=\"sp500-forecast-text\" class=\"forecast-text\">No S&amp;P 500 forecast data yet. Run a daily scan to generate it.</p>
+          <div id=\"sp500-forecast-tabs\" class=\"forecast-tabs\"></div>
+        </section>
+
         <section class=\"card\">
           <h2>Recommendation List</h2>
           <table class=\"sortable-table\">
@@ -600,10 +631,67 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
         </section>
       </aside>
     </section>
+    <footer class="footer">Last updated at: {generated_at}</footer>
   </main>
 
   <script>
     (function () {{
+      const marketHistory = {market_history_json};
+      const forecastText = document.getElementById('sp500-forecast-text');
+      const forecastTabs = document.getElementById('sp500-forecast-tabs');
+
+      const formatForecast = (row) => {{
+        const pct = Number(row?.percentage ?? 0);
+        const conf = Number(row?.confidence ?? 0);
+        const pctLabel = `${{pct >= 0 ? '+' : ''}}${{pct.toFixed(2)}}%`;
+        return `${{row?.label || 'N/A'}}: ${{pctLabel}} (conf ${{conf.toFixed(1)}}%)`;
+      }};
+
+      const renderForecast = (rows) => {{
+        if (!forecastText) return;
+        if (!rows || rows.length === 0) {{
+          forecastText.textContent = 'No S&P 500 forecast data yet. Run a daily scan to generate it.';
+          return;
+        }}
+        forecastText.textContent = rows.map(formatForecast).join(' | ');
+      }};
+
+      const renderForecastTabs = () => {{
+        if (!forecastTabs) return;
+        forecastTabs.innerHTML = '';
+        if (!marketHistory || marketHistory.length === 0) {{
+          renderForecast([]);
+          return;
+        }}
+
+        let selected = marketHistory[0].run_date;
+        const selectDate = (runDate) => {{
+          selected = runDate;
+          Array.from(forecastTabs.querySelectorAll('button')).forEach((btn) => {{
+            btn.classList.toggle('active', btn.dataset.runDate === selected);
+          }});
+          const row = marketHistory.find((item) => item.run_date === selected);
+          renderForecast(row?.forecasts || []);
+        }};
+
+        marketHistory.forEach((item) => {{
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'forecast-tab';
+          button.dataset.runDate = item.run_date;
+          const parsed = new Date(`${{item.run_date}}T00:00:00`);
+          button.textContent = Number.isNaN(parsed.valueOf())
+            ? item.run_date
+            : parsed.toLocaleDateString(undefined, {{ month: 'short', day: '2-digit' }});
+          button.addEventListener('click', () => selectDate(item.run_date));
+          forecastTabs.appendChild(button);
+        }});
+
+        selectDate(selected);
+      }};
+
+      renderForecastTabs();
+
       const collator = new Intl.Collator(undefined, {{ numeric: true, sensitivity: 'base' }});
       document.querySelectorAll('.sortable-table').forEach((table) => {{
         const headers = table.querySelectorAll('th.sortable');
