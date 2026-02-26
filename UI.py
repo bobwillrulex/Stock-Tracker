@@ -513,8 +513,11 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     portfolio_tab = ttk.Frame(notebook, style="Dark.TFrame")
     notebook.add(portfolio_tab, text="💼 Portfolio")
 
-    portfolio_form = tk.Frame(portfolio_tab, bg=colors["bg"])
-    portfolio_form.pack(fill="x", padx=10, pady=(10, 6))
+    portfolio_content = tk.Frame(portfolio_tab, bg=colors["bg"])
+    portfolio_content.pack(expand=True, fill="both")
+
+    portfolio_form = tk.Frame(portfolio_content, bg=colors["bg"])
+    portfolio_form.pack(pady=(10, 6), anchor="n")
 
     tk.Label(portfolio_form, text="Ticker", bg=colors["bg"], fg=colors["muted"]).grid(row=0, column=0, sticky="w")
     tk.Label(portfolio_form, text="Position (shares)", bg=colors["bg"], fg=colors["muted"]).grid(row=0, column=1, sticky="w", padx=(10, 0))
@@ -542,7 +545,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         "pnl_pct",
         "signal",
     )
-    portfolio_tree = ttk.Treeview(portfolio_tab, columns=portfolio_columns, show="headings", style="Dark.Treeview")
+    portfolio_tree = ttk.Treeview(portfolio_content, columns=portfolio_columns, show="headings", style="Dark.Treeview")
     portfolio_tree.heading("id", text="ID")
     portfolio_tree.heading("ticker", text="Ticker")
     portfolio_tree.heading("stock_name", text="Stock")
@@ -562,9 +565,9 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     portfolio_tree.column("pnl", width=120, anchor="e")
     portfolio_tree.column("pnl_pct", width=90, anchor="e")
     portfolio_tree.column("signal", width=130, anchor="center")
-    portfolio_tree.pack(expand=True, fill="both", padx=10, pady=(0, 8))
+    portfolio_tree.pack(expand=True, fill="both", padx=10, pady=(0, 8), anchor="n")
 
-    portfolio_status_label = tk.Label(portfolio_tab, textvariable=portfolio_status_var, fg=colors["muted"], bg=colors["bg"], anchor="w")
+    portfolio_status_label = tk.Label(portfolio_content, textvariable=portfolio_status_var, fg=colors["muted"], bg=colors["bg"], anchor="center")
     portfolio_status_label.pack(fill="x", padx=10, pady=(0, 10))
 
     watchlist_items = load_watchlist_items()
@@ -1606,7 +1609,7 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
     handle_progress_updates.stage_start_times = {}
 
-    def start_global_training():
+    def run_global_training():
         if task_in_progress["value"]:
             return
 
@@ -1630,6 +1633,30 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
         threading.Thread(target=worker, daemon=True).start()
         handle_progress_updates()
+
+    def start_global_training():
+        if task_in_progress["value"]:
+            return
+
+        first_confirm = messagebox.askyesno(
+            "Train global model",
+            "Are you sure you want to train the global model now?",
+            parent=root,
+        )
+        if not first_confirm:
+            train_status_var.set("Global model training cancelled.")
+            return
+
+        second_confirm = messagebox.askyesno(
+            "Confirm training",
+            "This can take several minutes. Start global model training now?",
+            parent=root,
+        )
+        if not second_confirm:
+            train_status_var.set("Global model training cancelled.")
+            return
+
+        run_global_training()
 
     def start_manual_scan():
         if task_in_progress["value"]:
