@@ -1,0 +1,87 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #f3f6fb;
+  color: #1f2937;
+}
+
+.page-header {
+  text-align: center;
+  padding: 2rem 1rem 1rem;
+}
+
+.portfolio-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+}
+
+.portfolio-card {
+  width: min(560px, 100%);
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.portfolio-card ul {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 1.5rem;
+}
+
+.portfolio-card li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+button {
+  border: none;
+  border-radius: 8px;
+  background: #2563eb;
+  color: white;
+  padding: 0.65rem 1rem;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #6b7280;
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.4);
+  padding: 1rem;
+}
+
+.modal-content {
+  width: min(440px, 100%);
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
+.modal-actions {
+  margin-top: 1rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}

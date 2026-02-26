@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stock Tracker</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="page-header">
+      <h1>Stock Tracker Portfolio</h1>
+    </header>
+
+    <main class="portfolio-wrapper">
+      <section class="portfolio-card" aria-label="Portfolio holdings">
+        <h2>My Portfolio</h2>
+        <ul>
+          <li><span>AAPL</span><strong>24 shares</strong></li>
+          <li><span>MSFT</span><strong>16 shares</strong></li>
+          <li><span>NVDA</span><strong>8 shares</strong></li>
+        </ul>
+        <button id="trainGlobalModelBtn" type="button">Train Global Model</button>
+      </section>
+    </main>
+
+    <div id="confirmTrainModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" hidden>
+      <div class="modal-content">
+        <h3 id="confirmTitle">Train global model?</h3>
+        <p>Are you sure you want to train the global model now?</p>
+        <div class="modal-actions">
+          <button id="cancelTrainBtn" type="button" class="secondary">No</button>
+          <button id="confirmTrainBtn" type="button">Yes</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="trainingResultModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="resultTitle" hidden>
+      <div class="modal-content">
+        <h3 id="resultTitle">Training started</h3>
+        <p>The global model training job has been queued successfully.</p>
+        <div class="modal-actions">
+          <button id="closeResultBtn" type="button">OK</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
