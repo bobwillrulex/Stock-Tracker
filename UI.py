@@ -1778,20 +1778,28 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     run_scan_btn = make_button(button_frame, "Run Daily Scan Now", start_manual_scan)
     run_scan_btn.pack(side="left", padx=5)
 
-    def clear_cached_stock_details():
+    def clear_all_cache_data():
         if not messagebox.askyesno(
-            "Delete cached stock details",
-            "This will delete all cached individual stock detail data (predictions, stop loss, take profit, chart snapshot).\n\n"
-            "It will NOT delete your trained AI model files or the 5-day list CSV outputs. Continue?",
+            "Delete all cache data",
+            "This will delete all cached stock detail and live signal snapshot data used for fast reloads.\n\n"
+            "It will NOT delete your trained AI model files, watchlist/portfolio entries, or the 5-day list CSV outputs. Continue?",
             parent=root,
         ):
             return
 
-        deleted = main.clear_all_stock_trade_plan_cache()
-        detail_status_var.set(f"Cleared cached stock details for {deleted} ticker(s).")
-        messagebox.showinfo("Cache cleared", f"Deleted cached detail data for {deleted} ticker(s).", parent=root)
+        summary = main.clear_all_local_caches()
+        deleted = int(summary.get("stock_detail_rows", 0) or 0)
+        removed_files = summary.get("removed_files", []) or []
+        removed_text = ", ".join(removed_files) if removed_files else "none"
 
-    clear_details_btn = make_button(button_frame, "Delete Stock Detail Cache", clear_cached_stock_details)
+        detail_status_var.set(f"Cleared cached stock details for {deleted} ticker(s). Removed cache files: {removed_text}.")
+        messagebox.showinfo(
+            "Cache cleared",
+            f"Deleted cached detail data for {deleted} ticker(s).\nRemoved files: {removed_text}.",
+            parent=root,
+        )
+
+    clear_details_btn = make_button(button_frame, "Delete All Cache", clear_all_cache_data)
     clear_details_btn.pack(side="left", padx=5)
 
     close_btn = make_button(button_frame, "Close", root.destroy)

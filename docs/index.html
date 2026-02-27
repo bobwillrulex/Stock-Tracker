@@ -3910,14 +3910,21 @@
             <thead>
               <tr>
                 <th class="sortable">Ticker</th>
+                <th class="sortable">Stock Name</th>
                 <th class="sortable">Shares</th>
                 <th class="sortable">Cost Basis</th>
                 <th class="sortable">Total Cost</th>
+                <th class="sortable">Price</th>
+                <th class="sortable">Current P&amp;L</th>
+                <th class="sortable">P&amp;L %</th>
+                <th class="sortable">AI 5D</th>
+                <th class="sortable">AI Conf.</th>
+                <th class="sortable">Signal /100</th>
                 <th>TradingView</th>
               </tr>
             </thead>
             <tbody>
-              <tr><td colspan='5'>No portfolio positions yet.</td></tr>
+              <tr><td colspan='12'>No portfolio positions yet.</td></tr>
             </tbody>
           </table>
         </section>
@@ -3931,22 +3938,24 @@
               <tr>
                 <th class="sortable">Ticker</th>
                 <th class="sortable">Name</th>
+                <th class="sortable">AI 5D</th>
+                <th class="sortable">Confidence</th>
                 <th>TradingView</th>
               </tr>
             </thead>
             <tbody>
-              <tr><td>AAPL</td><td>Apple Inc.</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/AAPL' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
-<tr><td>VSP.TO</td><td>-</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/TSX:VSP' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
-<tr><td>VCE.TO</td><td>-</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/TSX:VCE' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
-<tr><td>VEE.TO</td><td>-</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/TSX:VEE' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
-<tr><td>PLTR</td><td>Palantir Technologies Inc.</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/PLTR' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
-<tr><td>NVDA</td><td>-</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/NVDA' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
-<tr><td>RY.TO</td><td>-</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/TSX:RY' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
-<tr><td>TD.TO</td><td>TORONTO-DOMINION BANK</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/TSX:TD' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
-<tr><td>COST</td><td>-</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/COST' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
-<tr><td>AMD</td><td>Advanced Micro Devices, Inc.</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/AMD' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
-<tr><td>GOOG</td><td>Alphabet Inc.</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/GOOG' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
-<tr><td>AMZN</td><td>Amazon.com, Inc.</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/AMZN' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
+              <tr><td>AAPL</td><td>Apple Inc.</td><td data-sort-value='0.0000'><span class='forecast-value positive'>+0.00%</span></td><td data-sort-value='0.0000'>0.00%</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/AAPL' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
+<tr><td>VSP.TO</td><td>-</td><td data-sort-value='0.0000'><span class='forecast-value positive'>+0.00%</span></td><td data-sort-value='0.0000'>0.00%</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/TSX:VSP' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
+<tr><td>VCE.TO</td><td>-</td><td data-sort-value='0.0000'><span class='forecast-value positive'>+0.00%</span></td><td data-sort-value='0.0000'>0.00%</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/TSX:VCE' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
+<tr><td>VEE.TO</td><td>-</td><td data-sort-value='0.0000'><span class='forecast-value positive'>+0.00%</span></td><td data-sort-value='0.0000'>0.00%</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/TSX:VEE' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
+<tr><td>PLTR</td><td>Palantir Technologies Inc.</td><td data-sort-value='0.0000'><span class='forecast-value positive'>+0.00%</span></td><td data-sort-value='0.0000'>0.00%</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/PLTR' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
+<tr><td>NVDA</td><td>-</td><td data-sort-value='0.0000'><span class='forecast-value positive'>+0.00%</span></td><td data-sort-value='0.0000'>0.00%</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/NVDA' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
+<tr><td>RY.TO</td><td>-</td><td data-sort-value='0.0000'><span class='forecast-value positive'>+0.00%</span></td><td data-sort-value='0.0000'>0.00%</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/TSX:RY' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
+<tr><td>TD.TO</td><td>TORONTO-DOMINION BANK</td><td data-sort-value='0.0000'><span class='forecast-value positive'>+0.00%</span></td><td data-sort-value='0.0000'>0.00%</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/TSX:TD' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
+<tr><td>COST</td><td>-</td><td data-sort-value='0.0000'><span class='forecast-value positive'>+0.00%</span></td><td data-sort-value='0.0000'>0.00%</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/COST' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
+<tr><td>AMD</td><td>Advanced Micro Devices, Inc.</td><td data-sort-value='0.0000'><span class='forecast-value positive'>+0.00%</span></td><td data-sort-value='0.0000'>0.00%</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/AMD' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
+<tr><td>GOOG</td><td>Alphabet Inc.</td><td data-sort-value='0.0000'><span class='forecast-value positive'>+0.00%</span></td><td data-sort-value='0.0000'>0.00%</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/GOOG' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
+<tr><td>AMZN</td><td>Amazon.com, Inc.</td><td data-sort-value='0.0000'><span class='forecast-value positive'>+0.00%</span></td><td data-sort-value='0.0000'>0.00%</td><td><a class='tv-link' href='https://www.tradingview.com/symbols/AMZN' target='_blank' rel='noopener noreferrer'>Chart ↗</a></td></tr>
             </tbody>
           </table>
         </section>

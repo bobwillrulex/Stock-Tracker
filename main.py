@@ -393,6 +393,64 @@ def _format_market_cap(value):
     return f"${n:.0f}"
 
 
+def _score_to_action(score):
+    if score >= 67:
+        return "BUY"
+    if score <= 33:
+        return "SELL"
+    return "HOLD"
+
+
+def _compute_recommendation_score(pnl_percent, ai_prediction_percent=None):
+    momentum_component = max(min((pnl_percent + 15.0) / 30.0, 1.0), 0.0) * 60.0
+    if ai_prediction_percent is None:
+        ai_component = 20.0
+    else:
+        ai_component = max(min((ai_prediction_percent + 10.0) / 20.0, 1.0), 0.0) * 40.0
+    return max(min(momentum_component + ai_component, 100.0), 0.0)
+
+
+def _fetch_latest_price(ticker):
+    symbol = str(ticker or "").upper().strip()
+    if not symbol:
+        return None
+
+    try:
+        quote_df = yf.Ticker(symbol).history(period="5d", interval="1d", auto_adjust=False)
+        if quote_df is None or quote_df.empty:
+            quote_df = yf.download(symbol, period="5d", interval="1d", progress=False)
+        if quote_df is None or quote_df.empty:
+            return None
+
+        close_values = quote_df.get("Close")
+        series = _coerce_to_series(close_values)
+        if series is None:
+            return None
+
+        closes = pd.to_numeric(series, errors="coerce").dropna()
+        if closes.empty:
+            return None
+        return float(closes.iloc[-1])
+    except Exception:
+        return None
+
+
+def _build_signal_lookup(report_df):
+    lookup = {}
+    if report_df is None or report_df.empty:
+        return lookup
+
+    for _, row in report_df.iterrows():
+        symbol = str(row.get("ticker", "")).upper().strip()
+        if not symbol:
+            continue
+        lookup[symbol] = {
+            "prediction_pct": float(pd.to_numeric(row.get("percentage", 0), errors="coerce") or 0),
+            "confidence_pct": float(pd.to_numeric(row.get("confidence", 0), errors="coerce") or 0),
+        }
+    return lookup
+
+
 def _build_stock_name_map(report_df, watchlist_rows, portfolio_rows):
     """Resolve ticker->stock name for tables beyond the recommendation list."""
     name_map = {}
@@ -439,6 +497,7 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
     watchlist_rows = _load_watchlist_rows()
     portfolio_rows = _load_portfolio_rows()
     stock_name_map = _build_stock_name_map(report_df, watchlist_rows, portfolio_rows)
+    signal_lookup = _build_signal_lookup(report_df)
     market_history_rows = load_recent_sp500_forecast_history(days_to_keep=5)
 
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -484,20 +543,54 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
         ticker = html.escape(raw_ticker)
         resolved_name = row.get("stock_name") or stock_name_map.get(raw_ticker) or raw_ticker
         name = html.escape(str(resolved_name or "-").strip() or "-")
+        signal_row = signal_lookup.get(raw_ticker, {})
+        ai_5d = float(signal_row.get("prediction_pct", 0.0))
+        ai_conf = float(signal_row.get("confidence_pct", 0.0))
+        ai_cell = f"{ai_5d:+.2f}%"
+        ai_class = "positive" if ai_5d >= 0 else "negative"
+        conf_cell = f"{ai_conf:.2f}%"
         tv_symbol = _to_tv_symbol(raw_ticker)
         trading_view_link = (
             f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}' target='_blank' rel='noopener noreferrer'>Chart ↗</a>"
             if tv_symbol
             else "-"
         )
-        watchlist_html_rows.append(f"<tr><td>{ticker}</td><td>{name}</td><td>{trading_view_link}</td></tr>")
-    watchlist_body = "\n".join(watchlist_html_rows) if watchlist_html_rows else "<tr><td colspan='3'>No watchlist items yet.</td></tr>"
+        watchlist_html_rows.append(
+            f"<tr><td>{ticker}</td><td>{name}</td><td data-sort-value='{ai_5d:.4f}'><span class='forecast-value {ai_class}'>{ai_cell}</span></td><td data-sort-value='{ai_conf:.4f}'>{conf_cell}</td><td>{trading_view_link}</td></tr>"
+        )
+    watchlist_body = "\n".join(watchlist_html_rows) if watchlist_html_rows else "<tr><td colspan='5'>No watchlist items yet.</td></tr>"
 
     portfolio_html_rows = []
     for row in portfolio_rows:
         raw_ticker = str(row.get("ticker", "")).upper().strip()
         ticker = html.escape(raw_ticker)
         resolved_name = stock_name_map.get(raw_ticker) or raw_ticker
+        signal_row = signal_lookup.get(raw_ticker, {})
+        ai_prediction = float(signal_row.get("prediction_pct", 0.0))
+        ai_confidence = float(signal_row.get("confidence_pct", 0.0))
+        latest_price = _fetch_latest_price(raw_ticker)
+        shares = float(row.get("shares", 0.0) or 0.0)
+        cost_basis = float(row.get("cost_basis", 0.0) or 0.0)
+        total_cost = shares * cost_basis
+        price_cell = "--"
+        pnl_cell = "--"
+        pnl_pct_cell = "--"
+        pnl_sort = -10**12
+        pnl_pct_sort = -10**12
+        signal_score = 50.0
+        signal_action = "HOLD"
+        if isinstance(latest_price, (int, float)):
+            current_value = shares * float(latest_price)
+            pnl_value = current_value - total_cost
+            pnl_percent = (pnl_value / total_cost * 100.0) if total_cost else 0.0
+            signal_score = _compute_recommendation_score(pnl_percent, ai_prediction)
+            signal_action = _score_to_action(signal_score)
+            price_cell = f"${latest_price:.2f}"
+            pnl_cell = f"${pnl_value:+.2f}"
+            pnl_pct_cell = f"{pnl_percent:+.2f}%"
+            pnl_sort = pnl_value
+            pnl_pct_sort = pnl_percent
+
         tv_symbol = _to_tv_symbol(raw_ticker)
         trading_view_link = (
             f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}' target='_blank' rel='noopener noreferrer'>Chart ↗</a>"
@@ -505,9 +598,9 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
             else "-"
         )
         portfolio_html_rows.append(
-            f"<tr><td>{ticker}</td><td>{html.escape(str(resolved_name))}</td><td data-sort-value='{row['shares']:.4f}'>{row['shares']:.4f}</td><td data-sort-value='{row['cost_basis']:.4f}'>${row['cost_basis']:.2f}</td><td data-sort-value='{row['position_cost']:.2f}'>${row['position_cost']:.2f}</td><td>{trading_view_link}</td></tr>"
+            f"<tr><td>{ticker}</td><td>{html.escape(str(resolved_name))}</td><td data-sort-value='{shares:.4f}'>{shares:.4f}</td><td data-sort-value='{cost_basis:.4f}'>${cost_basis:.2f}</td><td data-sort-value='{total_cost:.2f}'>${total_cost:.2f}</td><td>{price_cell}</td><td data-sort-value='{pnl_sort:.4f}'>{pnl_cell}</td><td data-sort-value='{pnl_pct_sort:.4f}'>{pnl_pct_cell}</td><td data-sort-value='{ai_prediction:.4f}'>{ai_prediction:+.2f}%</td><td data-sort-value='{ai_confidence:.4f}'>{ai_confidence:.2f}%</td><td data-sort-value='{signal_score:.4f}'>{signal_action} {signal_score:.0f}/100</td><td>{trading_view_link}</td></tr>"
         )
-    portfolio_body = "\n".join(portfolio_html_rows) if portfolio_html_rows else "<tr><td colspan='6'>No portfolio positions yet.</td></tr>"
+    portfolio_body = "\n".join(portfolio_html_rows) if portfolio_html_rows else "<tr><td colspan='12'>No portfolio positions yet.</td></tr>"
 
     day_labels = {1: "Tomorrow", 2: "2 days", 3: "3 days", 4: "4 days", 5: "5 days"}
     market_history_payload = []
@@ -647,6 +740,12 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
                 <th class=\"sortable\">Shares</th>
                 <th class=\"sortable\">Cost Basis</th>
                 <th class=\"sortable\">Total Cost</th>
+                <th class=\"sortable\">Price</th>
+                <th class=\"sortable\">Current P&amp;L</th>
+                <th class=\"sortable\">P&amp;L %</th>
+                <th class=\"sortable\">AI 5D</th>
+                <th class=\"sortable\">AI Conf.</th>
+                <th class=\"sortable\">Signal /100</th>
                 <th>TradingView</th>
               </tr>
             </thead>
@@ -665,6 +764,8 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
               <tr>
                 <th class=\"sortable\">Ticker</th>
                 <th class=\"sortable\">Name</th>
+                <th class=\"sortable\">AI 5D</th>
+                <th class=\"sortable\">Confidence</th>
                 <th>TradingView</th>
               </tr>
             </thead>
@@ -1569,6 +1670,26 @@ def clear_all_stock_trade_plan_cache(db_path=STOCK_DETAIL_CACHE_DB_PATH):
         cursor = conn.execute("DELETE FROM stock_detail_cache")
         conn.commit()
         return int(cursor.rowcount or 0)
+
+
+def clear_all_local_caches():
+    """Delete all local cache stores used for fast UI/dashboard reloads."""
+    summary = {
+        "stock_detail_rows": 0,
+        "removed_files": [],
+    }
+
+    summary["stock_detail_rows"] = clear_all_stock_trade_plan_cache()
+
+    for cache_path in (LIVE_SIGNAL_DB_PATH,):
+        if os.path.exists(cache_path):
+            try:
+                os.remove(cache_path)
+                summary["removed_files"].append(cache_path)
+            except OSError:
+                pass
+
+    return summary
 
 
 def _ensure_live_signal_table(conn):
