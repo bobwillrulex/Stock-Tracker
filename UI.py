@@ -59,13 +59,18 @@ def load_watchlist_items(path=WATCHLIST_DB_PATH):
             rows = conn.execute(
                 "SELECT ticker, stock_name FROM watchlist ORDER BY created_at ASC"
             ).fetchall()
-        return [{"ticker": str(ticker).upper(), "name": stock_name or ""} for ticker, stock_name in rows]
+        items = []
+        for ticker, stock_name in rows:
+            symbol = normalize_ticker_input(ticker)
+            if symbol:
+                items.append({"ticker": symbol, "name": stock_name or ""})
+        return items
     except Exception:
         return []
 
 
 def upsert_watchlist_item(ticker, stock_name="", path=WATCHLIST_DB_PATH):
-    symbol = str(ticker).strip().upper()
+    symbol = normalize_ticker_input(ticker)
     if not symbol:
         return
     try:
@@ -86,7 +91,7 @@ def upsert_watchlist_item(ticker, stock_name="", path=WATCHLIST_DB_PATH):
 
 
 def delete_watchlist_item(ticker, path=WATCHLIST_DB_PATH):
-    symbol = str(ticker).strip().upper()
+    symbol = normalize_ticker_input(ticker)
     if not symbol:
         return
     try:
@@ -198,6 +203,8 @@ def normalize_ticker_input(raw_ticker):
         return ""
 
     symbol = symbol.replace(" ", "")
+    while symbol.startswith("$"):
+        symbol = symbol[1:]
     if symbol.startswith("TSX:"):
         symbol = f"{symbol.split(':', 1)[1]}.TO"
     if symbol.endswith("-TO"):

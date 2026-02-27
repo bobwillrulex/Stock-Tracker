@@ -74,6 +74,22 @@ FEATURE_COLUMNS = [
 INPUT_SIZE = len(FEATURE_COLUMNS)
 
 
+def _normalize_ticker_symbol(raw_ticker):
+    """Normalize user/API ticker symbols for yfinance calls and cache keys."""
+    symbol = str(raw_ticker or "").strip().upper().replace(" ", "")
+    if not symbol:
+        return ""
+
+    while symbol.startswith("$"):
+        symbol = symbol[1:]
+
+    if symbol.startswith("TSX:"):
+        symbol = f"{symbol.split(':', 1)[1]}.TO"
+    if symbol.endswith("-TO"):
+        symbol = symbol[:-3] + ".TO"
+    return symbol
+
+
 def _stable_seed(*parts):
     """Create a deterministic 32-bit seed from arbitrary values."""
     token = "::".join(str(p) for p in parts)
@@ -325,12 +341,12 @@ def _load_watchlist_rows(path=os.path.join(BASE_DIR, "watchlist.db")):
 
     return [
         {
-            "ticker": str(ticker or "").upper(),
+            "ticker": _normalize_ticker_symbol(ticker),
             "stock_name": str(stock_name or ""),
             "created_at": str(created_at or ""),
         }
         for ticker, stock_name, created_at in rows
-        if str(ticker or "").strip()
+        if _normalize_ticker_symbol(ticker)
     ]
 
 
@@ -352,7 +368,7 @@ def _load_portfolio_rows(path=os.path.join(BASE_DIR, "portfolio.db")):
 
     payload = []
     for ticker, shares, cost_basis, created_at in rows:
-        symbol = str(ticker or "").upper().strip()
+        symbol = _normalize_ticker_symbol(ticker)
         if not symbol:
             continue
         qty = float(shares or 0)
@@ -442,7 +458,7 @@ def _ensure_web_report_cache_table(conn):
 
 
 def upsert_web_report_cache(ticker, day5_prediction_pct=None, day5_confidence_pct=None, db_path=WEB_REPORT_CACHE_DB_PATH):
-    symbol = str(ticker or "").strip().upper()
+    symbol = _normalize_ticker_symbol(ticker)
     if not symbol:
         return False
 
