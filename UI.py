@@ -621,11 +621,42 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
         except Exception:
             return None, None
 
+    stock_name_cache = {}
+
     def get_stock_name_for_ticker(ticker):
+        symbol = str(ticker or "").upper().strip()
+        if not symbol:
+            return ""
+
+        cached = stock_name_cache.get(symbol)
+        if cached:
+            return cached
+
+        for item in watchlist_items:
+            if str(item.get("ticker", "")).upper() == symbol:
+                candidate = str(item.get("name") or "").strip()
+                if candidate:
+                    stock_name_cache[symbol] = candidate
+                    return candidate
+
         for table in ("ai", "macd", "rsi"):
             for row in rows_store.get(table, []):
-                if str(row.get("ticker", "")).upper() == ticker:
-                    return row.get("stock_name", "")
+                if str(row.get("ticker", "")).upper() == symbol:
+                    candidate = str(row.get("stock_name", "")).strip()
+                    if candidate:
+                        stock_name_cache[symbol] = candidate
+                        return candidate
+
+        if yf is not None:
+            try:
+                info = yf.Ticker(symbol).info or {}
+                candidate = str(info.get("shortName") or info.get("longName") or "").strip()
+                if candidate:
+                    stock_name_cache[symbol] = candidate
+                    return candidate
+            except Exception:
+                pass
+
         return ""
 
     def refresh_portfolio_table():
