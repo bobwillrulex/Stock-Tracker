@@ -399,6 +399,9 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     market_forecast_label = tk.Label(market_frame, textvariable=market_forecast_var, font=("Arial", 10), justify="left", anchor="w", bg=colors["panel"], fg=colors["muted"])
     market_forecast_label.pack(fill="x", pady=(2, 0))
 
+    market_forecast_boxes_frame = tk.Frame(market_frame, bg=colors["panel"])
+    market_forecast_boxes_frame.pack(fill="x", pady=(2, 0))
+
     market_tabs_frame = tk.Frame(market_frame, bg=colors["panel"])
     market_tabs_frame.pack(fill="x", pady=(6, 0))
 
@@ -432,19 +435,57 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
     market_forecast_history = {"rows": []}
 
     def render_market_forecast(rows):
+        for widget in market_forecast_boxes_frame.winfo_children():
+            widget.destroy()
+
         if not rows:
             market_forecast_var.set("No S&P 500 forecast data yet. Run a daily scan to generate it.")
             return
 
+        market_forecast_var.set("")
         day_labels = {1: "Tomorrow", 2: "2 days", 3: "3 days", 4: "4 days", 5: "5 days"}
-        chunks = []
         for row in rows:
             day = int(row.get("day", 0))
-            chunks.append(
-                f"{day_labels.get(day, f'{day} days')}: {row.get('percentage', 0):+.2f}% (conf {row.get('confidence', 0):.1f}%)"
-            )
+            pct = float(row.get("percentage", 0) or 0)
+            confidence = float(row.get("confidence", 0) or 0)
+            pct_bg = "#1f6f43" if pct >= 0 else "#8a2c2c"
+            pct_fg = "#e9fff4" if pct >= 0 else "#ffecec"
 
-        market_forecast_var.set("   |   ".join(chunks))
+            card = tk.Frame(
+                market_forecast_boxes_frame,
+                bg=colors["panel_soft"],
+                highlightthickness=1,
+                highlightbackground=colors["border"],
+                padx=8,
+                pady=5,
+            )
+            card.pack(side="left", padx=(0, 6), pady=(0, 2))
+
+            tk.Label(
+                card,
+                text=day_labels.get(day, f"{day} days"),
+                bg=colors["panel_soft"],
+                fg=colors["text"],
+                font=("Arial", 9, "bold"),
+            ).pack(anchor="w")
+
+            tk.Label(
+                card,
+                text=f"{pct:+.2f}%",
+                bg=pct_bg,
+                fg=pct_fg,
+                font=("Arial", 9, "bold"),
+                padx=6,
+                pady=2,
+            ).pack(anchor="w", pady=(3, 2))
+
+            tk.Label(
+                card,
+                text=f"conf {confidence:.1f}%",
+                bg=colors["panel_soft"],
+                fg=colors["muted"],
+                font=("Arial", 8),
+            ).pack(anchor="w")
 
     def render_market_tabs():
         for widget in market_tabs_frame.winfo_children():
