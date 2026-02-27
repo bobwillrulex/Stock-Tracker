@@ -38,7 +38,7 @@
     .layout { display: flex; gap: 1rem; align-items: flex-start; }
     .main { flex: 1 1 auto; min-width: 0; display: grid; gap: 1rem; }
     .right { width: 340px; max-width: 100%; position: sticky; top: 1rem; }
-    .top-nav { display: flex; gap: .55rem; margin-bottom: .9rem; }
+    .top-nav { display: flex; flex-wrap: wrap; gap: .55rem; margin-bottom: .9rem; }
     .top-nav-btn { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px; padding: .4rem .85rem; font-size: .86rem; cursor: pointer; }
     .top-nav-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(77,163,255,.12); }
     .card {
@@ -49,7 +49,15 @@
       box-shadow: 0 8px 24px var(--shadow);
     }
     h2 { margin: 0 0 .8rem 0; font-size: 1.04rem; }
-    table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .92rem;
+      display: block;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      white-space: nowrap;
+    }
     th, td { border-bottom: 1px solid rgba(156,174,206,.2); padding: .62rem .55rem; text-align: left; }
     th { color: #d6e4ff; font-weight: 600; user-select: none; }
     th.sortable { cursor: pointer; }
@@ -73,6 +81,19 @@
     @media (max-width: 1080px) {
       .layout { flex-direction: column; }
       .right { width: 100%; position: static; }
+    }
+    @media (max-width: 760px) {
+      .page { padding: .9rem; }
+      .header { padding: 1rem; border-radius: 12px; }
+      h1 { font-size: 1.15rem; line-height: 1.35; }
+      .pill { display: inline-block; margin-top: .35rem; }
+      .meta { font-size: .82rem; }
+      .card { padding: .8rem; border-radius: 12px; }
+      h2 { font-size: .95rem; }
+      th, td { padding: .55rem .5rem; font-size: .84rem; }
+      .top-nav-btn { padding: .35rem .75rem; font-size: .8rem; }
+      .forecast-card { min-width: 116px; }
+      .footer { text-align: left; font-size: .8rem; }
     }
   </style>
 </head>
