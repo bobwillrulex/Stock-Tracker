@@ -59,6 +59,13 @@
     .tv-link:hover { text-decoration: underline; }
     .pill { background: rgba(56,217,150,.17); color: var(--good); border: 1px solid rgba(56,217,150,.4); border-radius: 999px; padding: .25rem .55rem; font-size: .75rem; }
     .forecast-text { color: var(--muted); font-size: .94rem; line-height: 1.5; margin: .3rem 0 0 0; }
+    .forecast-grid { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .45rem; }
+    .forecast-card { background: var(--panel-soft); border: 1px solid var(--line); border-radius: 10px; padding: .45rem .55rem; min-width: 132px; }
+    .forecast-label { font-size: .8rem; color: #dbe7ff; margin: 0 0 .35rem 0; font-weight: 600; }
+    .forecast-value { display: inline-block; font-size: .82rem; font-weight: 700; border-radius: 6px; padding: .15rem .45rem; }
+    .forecast-value.positive { background: rgba(56, 217, 150, .25); color: #b4ffd9; border: 1px solid rgba(56, 217, 150, .55); }
+    .forecast-value.negative { background: rgba(255, 107, 107, .22); color: #ffd2d2; border: 1px solid rgba(255, 107, 107, .5); }
+    .forecast-conf { margin-top: .35rem; color: var(--muted); font-size: .75rem; }
     .forecast-tabs { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .75rem; }
     .forecast-tab { border: 1px solid var(--line); border-radius: 999px; background: var(--panel-soft); color: var(--text); padding: .2rem .65rem; font-size: .78rem; cursor: pointer; }
     .forecast-tab.active { border-color: var(--accent); color: var(--accent); }
@@ -3937,7 +3944,14 @@
         const pct = Number(row?.percentage ?? 0);
         const conf = Number(row?.confidence ?? 0);
         const pctLabel = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
-        return `${row?.label || 'N/A'}: ${pctLabel} (conf ${conf.toFixed(1)}%)`;
+        const signClass = pct >= 0 ? 'positive' : 'negative';
+        return `
+          <div class="forecast-card">
+            <p class="forecast-label">${row?.label || 'N/A'}</p>
+            <span class="forecast-value ${signClass}">${pctLabel}</span>
+            <div class="forecast-conf">conf ${conf.toFixed(1)}%</div>
+          </div>
+        `;
       };
 
       const renderForecast = (rows) => {
@@ -3946,7 +3960,7 @@
           forecastText.textContent = 'No S&P 500 forecast data yet. Run a daily scan to generate it.';
           return;
         }
-        forecastText.textContent = rows.map(formatForecast).join(' | ');
+        forecastText.innerHTML = `<div class="forecast-grid">${rows.map(formatForecast).join('')}</div>`;
       };
 
       const renderForecastTabs = () => {
