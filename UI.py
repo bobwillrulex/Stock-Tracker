@@ -1780,18 +1780,30 @@ def launch_signals_ui(csv_path=SIGNALS_CSV_PATH):
 
     def clear_cached_stock_details():
         if not messagebox.askyesno(
-            "Delete cached stock details",
-            "This will delete all cached individual stock detail data (predictions, stop loss, take profit, chart snapshot).\n\n"
+            "Delete all cache",
+            "This will delete all cached individual stock detail data (predictions, stop loss, take profit, chart snapshot)\n"
+            "and website report AI cache for watchlist/portfolio 5-day predictions.\n\n"
             "It will NOT delete your trained AI model files or the 5-day list CSV outputs. Continue?",
             parent=root,
         ):
             return
 
-        deleted = main.clear_all_stock_trade_plan_cache()
-        detail_status_var.set(f"Cleared cached stock details for {deleted} ticker(s).")
-        messagebox.showinfo("Cache cleared", f"Deleted cached detail data for {deleted} ticker(s).", parent=root)
+        deleted_detail = main.clear_all_stock_trade_plan_cache()
+        deleted_web = main.clear_all_web_report_cache()
+        total_deleted = deleted_detail + deleted_web
+        detail_status_var.set(
+            f"Cleared cache entries: detail={deleted_detail}, web={deleted_web}, total={total_deleted}."
+        )
+        messagebox.showinfo(
+            "Cache cleared",
+            f"Deleted cache entries:\n"
+            f"- Stock detail cache: {deleted_detail}\n"
+            f"- Website report cache: {deleted_web}\n"
+            f"Total: {total_deleted}",
+            parent=root,
+        )
 
-    clear_details_btn = make_button(button_frame, "Delete Stock Detail Cache", clear_cached_stock_details)
+    clear_details_btn = make_button(button_frame, "Delete All Cache", clear_cached_stock_details)
     clear_details_btn.pack(side="left", padx=5)
 
     close_btn = make_button(button_frame, "Close", root.destroy)

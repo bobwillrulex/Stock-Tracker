@@ -41,8 +41,10 @@ MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
 MARKET_FORECAST_DB_PATH = "sp500_forecast.db"
 LIVE_SIGNAL_DB_PATH = "live_trading_signals.db"
 STOCK_DETAIL_CACHE_DB_PATH = "stock_details_cache.db"
+WEB_REPORT_CACHE_DB_PATH = "web_report_cache.db"
 PAGES_DIR = "docs"
 PAGES_INDEX_PATH = os.path.join(PAGES_DIR, "index.html")
+PAGES_PORTFOLIO_PATH = os.path.join(PAGES_DIR, "portfolio.html")
 PAGES_NOJEKYLL_PATH = os.path.join(PAGES_DIR, ".nojekyll")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -424,15 +426,179 @@ def _build_stock_name_map(report_df, watchlist_rows, portfolio_rows):
     return name_map
 
 
+def _ensure_web_report_cache_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS web_report_cache (
+            ticker TEXT PRIMARY KEY,
+            day5_prediction_pct REAL,
+            day5_confidence_pct REAL,
+            updated_at_utc TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+
+
+def upsert_web_report_cache(ticker, day5_prediction_pct=None, day5_confidence_pct=None, db_path=WEB_REPORT_CACHE_DB_PATH):
+    symbol = str(ticker or "").strip().upper()
+    if not symbol:
+        return False
+
+    now_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    with sqlite3.connect(db_path) as conn:
+        _ensure_web_report_cache_table(conn)
+        conn.execute(
+            """
+            INSERT INTO web_report_cache (ticker, day5_prediction_pct, day5_confidence_pct, updated_at_utc)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(ticker) DO UPDATE SET
+                day5_prediction_pct = excluded.day5_prediction_pct,
+                day5_confidence_pct = excluded.day5_confidence_pct,
+                updated_at_utc = excluded.updated_at_utc
+            """,
+            (symbol, day5_prediction_pct, day5_confidence_pct, now_utc),
+        )
+        conn.commit()
+    return True
+
+
+def load_web_report_cache_map(db_path=WEB_REPORT_CACHE_DB_PATH):
+    if not os.path.exists(db_path):
+        return {}
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            _ensure_web_report_cache_table(conn)
+            rows = conn.execute(
+                "SELECT ticker, day5_prediction_pct, day5_confidence_pct FROM web_report_cache"
+            ).fetchall()
+    except Exception:
+        return {}
+
+    payload = {}
+    for ticker, pred_pct, conf_pct in rows:
+        symbol = str(ticker or "").strip().upper()
+        if not symbol:
+            continue
+        payload[symbol] = {
+            "day5_prediction_pct": float(pred_pct) if pred_pct is not None else None,
+            "day5_confidence_pct": float(conf_pct) if conf_pct is not None else None,
+        }
+    return payload
+
+
+def clear_all_web_report_cache(db_path=WEB_REPORT_CACHE_DB_PATH):
+    if not os.path.exists(db_path):
+        return 0
+
+    with sqlite3.connect(db_path) as conn:
+        _ensure_web_report_cache_table(conn)
+        cursor = conn.execute("DELETE FROM web_report_cache")
+        conn.commit()
+        return int(cursor.rowcount or 0)
+
+
+def _fetch_latest_price_and_change(ticker):
+    symbol = str(ticker or "").strip().upper()
+    if not symbol:
+        return None, None
+
+    try:
+        quote_df = yf.download(symbol, period="5d", interval="1d", progress=False)
+        if quote_df is None or quote_df.empty:
+            quote_df = yf.download(symbol, period="1mo", interval="1d", progress=False)
+        if quote_df is None or quote_df.empty:
+            return None, None
+
+        close_values = quote_df.get("Close")
+        if isinstance(close_values, pd.DataFrame):
+            if close_values.shape[1] == 0:
+                return None, None
+            close_values = close_values.iloc[:, 0]
+
+        closes = pd.to_numeric(close_values, errors="coerce").dropna()
+        if closes.empty:
+            return None, None
+
+        latest = float(closes.iloc[-1])
+        if len(closes) >= 2:
+            prev = float(closes.iloc[-2])
+            change_pct = ((latest - prev) / prev) * 100 if prev else 0.0
+        else:
+            change_pct = 0.0
+        return latest, change_pct
+    except Exception:
+        return None, None
+
+
+def _score_to_action(score):
+    if score >= 67:
+        return "BUY"
+    if score <= 33:
+        return "SELL"
+    return "HOLD"
+
+
+def _compute_recommendation_score(pnl_percent, ai_prediction_percent=None):
+    momentum_component = max(min((pnl_percent + 15.0) / 30.0, 1.0), 0.0) * 60.0
+    if ai_prediction_percent is None:
+        ai_component = 20.0
+    else:
+        ai_component = max(min((ai_prediction_percent + 10.0) / 20.0, 1.0), 0.0) * 40.0
+    return max(min(momentum_component + ai_component, 100.0), 0.0)
+
+
+def _resolve_day5_prediction_pct(ticker, ai_prediction_map, web_cache_map):
+    symbol = str(ticker or "").strip().upper()
+    if not symbol:
+        return None, None
+
+    ai_pct = ai_prediction_map.get(symbol)
+    if ai_pct is not None and ai_pct > 2.0:
+        return float(ai_pct), None
+
+    cached = web_cache_map.get(symbol, {})
+    cached_pred = cached.get("day5_prediction_pct")
+    cached_conf = cached.get("day5_confidence_pct")
+    if cached_pred is not None:
+        return float(cached_pred), float(cached_conf) if cached_conf is not None else None
+
+    detail_payload = load_stock_trade_plan_cache(symbol)
+    if detail_payload:
+        trade_plan = detail_payload.get("trade_plan", {})
+        pred = trade_plan.get("day5_predicted_return")
+        conf = trade_plan.get("day5_confidence")
+        if pred is not None:
+            pred_pct = float(pred) * 100.0
+            conf_pct = float(conf) * 100.0 if conf is not None else None
+            upsert_web_report_cache(symbol, pred_pct, conf_pct)
+            web_cache_map[symbol] = {"day5_prediction_pct": pred_pct, "day5_confidence_pct": conf_pct}
+            return pred_pct, conf_pct
+
+    try:
+        payload = generate_stock_trade_plan(symbol)
+        save_stock_trade_plan_cache(payload)
+        trade_plan = payload.get("trade_plan", {})
+        pred = trade_plan.get("day5_predicted_return")
+        conf = trade_plan.get("day5_confidence")
+        if pred is not None:
+            pred_pct = float(pred) * 100.0
+            conf_pct = float(conf) * 100.0 if conf is not None else None
+            upsert_web_report_cache(symbol, pred_pct, conf_pct)
+            web_cache_map[symbol] = {"day5_prediction_pct": pred_pct, "day5_confidence_pct": conf_pct}
+            return pred_pct, conf_pct
+    except Exception:
+        return None, None
+
+    return None, None
+
+
 def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_INDEX_PATH):
-    """Render a modern, sortable GitHub Pages dashboard from local signal/watchlist data."""
+    """Render sortable GitHub Pages dashboard pages for recommendations and portfolio."""
     os.makedirs(os.path.dirname(output_html), exist_ok=True)
 
-    if os.path.exists(source_csv):
-        report_df = pd.read_csv(source_csv)
-    else:
-        report_df = pd.DataFrame(columns=["stock_name", "ticker", "percentage", "confidence", "marketcap"])
-
+    report_df = pd.read_csv(source_csv) if os.path.exists(source_csv) else pd.DataFrame(columns=["stock_name", "ticker", "percentage", "confidence", "marketcap"])
     if not report_df.empty:
         report_df = report_df.fillna("").sort_values(by="marketcap", ascending=False)
 
@@ -441,8 +607,16 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
     stock_name_map = _build_stock_name_map(report_df, watchlist_rows, portfolio_rows)
     market_history_rows = load_recent_sp500_forecast_history(days_to_keep=5)
 
+    ai_prediction_map = {}
+    for _, row in report_df.iterrows():
+        symbol = str(row.get("ticker", "")).upper().strip()
+        if symbol:
+            ai_prediction_map[symbol] = float(pd.to_numeric(row.get("percentage", 0), errors="coerce") or 0)
+
+    web_cache_map = load_web_report_cache_map()
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    rows = []
+
+    rec_rows = []
     for _, row in report_df.iterrows():
         stock_name = html.escape(str(row.get("stock_name", "")) or "-")
         ticker = html.escape(str(row.get("ticker", "")) or "-")
@@ -450,64 +624,66 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
         confidence = float(pd.to_numeric(row.get("confidence", 0), errors="coerce") or 0)
         marketcap_num = float(pd.to_numeric(row.get("marketcap", 0), errors="coerce") or 0)
         tv_symbol = _to_tv_symbol(ticker)
-        trading_view_link = (
-            f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}' target='_blank' rel='noopener noreferrer'>Open ↗</a>"
-            if tv_symbol
-            else "-"
+        tv_link = f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}/' target='_blank' rel='noopener'>View</a>" if tv_symbol else "-"
+        rec_rows.append(
+            f"<tr><td>{stock_name}</td><td>{ticker}</td><td data-sort-value='{percentage:.4f}'>{percentage:+.2f}%</td><td data-sort-value='{confidence:.4f}'>{confidence:.2f}%</td><td data-sort-value='{marketcap_num:.0f}'>{_format_market_cap(marketcap_num)}</td><td>{tv_link}</td></tr>"
         )
-        rows.append(
-            """
-            <tr>
-              <td>{stock_name}</td>
-              <td>{ticker}</td>
-              <td data-sort-value="{percentage:.4f}">{percentage:+.2f}%</td>
-              <td data-sort-value="{confidence:.4f}">{confidence:.2f}%</td>
-              <td data-sort-value="{marketcap_num:.0f}">{marketcap}</td>
-              <td>{trading_view_link}</td>
-            </tr>
-            """.format(
-                stock_name=stock_name,
-                ticker=ticker,
-                percentage=percentage,
-                confidence=confidence,
-                marketcap_num=marketcap_num,
-                marketcap=html.escape(_format_market_cap(marketcap_num)),
-                trading_view_link=trading_view_link,
-            )
-        )
+    rec_body = "\n".join(rec_rows) if rec_rows else "<tr><td colspan='6'>No buy signals yet. Run a scan first.</td></tr>"
 
-    table_body = "\n".join(rows) if rows else "<tr><td colspan='6'>No recommendations from the latest scan.</td></tr>"
-
-    watchlist_html_rows = []
+    watch_rows = []
     for row in watchlist_rows:
-        raw_ticker = str(row.get("ticker", "")).upper().strip()
-        ticker = html.escape(raw_ticker)
-        resolved_name = row.get("stock_name") or stock_name_map.get(raw_ticker) or raw_ticker
-        name = html.escape(str(resolved_name or "-").strip() or "-")
-        tv_symbol = _to_tv_symbol(raw_ticker)
-        trading_view_link = (
-            f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}' target='_blank' rel='noopener noreferrer'>Chart ↗</a>"
-            if tv_symbol
-            else "-"
+        ticker = str(row.get("ticker", "")).upper().strip()
+        if not ticker:
+            continue
+        resolved_name = stock_name_map.get(ticker) or row.get("stock_name") or ticker
+        tv_symbol = _to_tv_symbol(ticker)
+        tv_link = f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}/' target='_blank' rel='noopener'>View</a>" if tv_symbol else "-"
+        pred_pct, conf_pct = _resolve_day5_prediction_pct(ticker, ai_prediction_map, web_cache_map)
+        pred_text = f"{pred_pct:+.2f}%" if pred_pct is not None else "--"
+        conf_text = f" ({conf_pct:.1f}%)" if conf_pct is not None else ""
+        watch_rows.append(
+            f"<tr><td>{html.escape(ticker)}</td><td>{html.escape(str(resolved_name))}</td><td data-sort-value='{pred_pct if pred_pct is not None else ''}'>{pred_text}{conf_text}</td><td>{tv_link}</td></tr>"
         )
-        watchlist_html_rows.append(f"<tr><td>{ticker}</td><td>{name}</td><td>{trading_view_link}</td></tr>")
-    watchlist_body = "\n".join(watchlist_html_rows) if watchlist_html_rows else "<tr><td colspan='3'>No watchlist items yet.</td></tr>"
+    watch_body = "\n".join(watch_rows) if watch_rows else "<tr><td colspan='4'>No watchlist entries yet.</td></tr>"
 
     portfolio_html_rows = []
     for row in portfolio_rows:
-        raw_ticker = str(row.get("ticker", "")).upper().strip()
-        ticker = html.escape(raw_ticker)
-        resolved_name = stock_name_map.get(raw_ticker) or raw_ticker
-        tv_symbol = _to_tv_symbol(raw_ticker)
-        trading_view_link = (
-            f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}' target='_blank' rel='noopener noreferrer'>Chart ↗</a>"
-            if tv_symbol
-            else "-"
-        )
+        ticker = str(row.get("ticker", "")).upper().strip()
+        if not ticker:
+            continue
+        resolved_name = stock_name_map.get(ticker) or ticker
+        shares = float(row.get("shares", 0) or 0)
+        cost_basis = float(row.get("cost_basis", 0) or 0)
+        total_cost = shares * cost_basis
+        current_price, _ = _fetch_latest_price_and_change(ticker)
+        ai_pred_pct, _ = _resolve_day5_prediction_pct(ticker, ai_prediction_map, web_cache_map)
+
+        if current_price is None:
+            current_price_text = "--"
+            pnl_text = "--"
+            pnl_pct_text = "--"
+            signal_text = "HOLD 50/100"
+            sort_pnl = ""
+            sort_pnl_pct = ""
+        else:
+            current_value = shares * current_price
+            pnl = current_value - total_cost
+            pnl_pct = (pnl / total_cost * 100.0) if total_cost else 0.0
+            score = _compute_recommendation_score(pnl_pct, ai_pred_pct)
+            signal_text = f"{_score_to_action(score)} {score:.0f}/100"
+            current_price_text = f"${current_price:.2f}"
+            pnl_text = f"${pnl:+.2f}"
+            pnl_pct_text = f"{pnl_pct:+.2f}%"
+            sort_pnl = f"{pnl:.4f}"
+            sort_pnl_pct = f"{pnl_pct:.4f}"
+
+        ai_pred_text = f"{ai_pred_pct:+.2f}%" if ai_pred_pct is not None else "--"
+        tv_symbol = _to_tv_symbol(ticker)
+        tv_link = f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}/' target='_blank' rel='noopener'>View</a>" if tv_symbol else "-"
         portfolio_html_rows.append(
-            f"<tr><td>{ticker}</td><td>{html.escape(str(resolved_name))}</td><td data-sort-value='{row['shares']:.4f}'>{row['shares']:.4f}</td><td data-sort-value='{row['cost_basis']:.4f}'>${row['cost_basis']:.2f}</td><td data-sort-value='{row['position_cost']:.2f}'>${row['position_cost']:.2f}</td><td>{trading_view_link}</td></tr>"
+            f"<tr><td>{html.escape(ticker)}</td><td>{html.escape(str(resolved_name))}</td><td data-sort-value='{shares:.4f}'>{shares:.4f}</td><td data-sort-value='{cost_basis:.4f}'>${cost_basis:.2f}</td><td data-sort-value='{total_cost:.2f}'>${total_cost:.2f}</td><td>{current_price_text}</td><td data-sort-value='{sort_pnl}'>{pnl_text}</td><td data-sort-value='{sort_pnl_pct}'>{pnl_pct_text}</td><td data-sort-value='{ai_pred_pct if ai_pred_pct is not None else ''}'>{ai_pred_text}</td><td>{signal_text}</td><td>{tv_link}</td></tr>"
         )
-    portfolio_body = "\n".join(portfolio_html_rows) if portfolio_html_rows else "<tr><td colspan='6'>No portfolio positions yet.</td></tr>"
+    portfolio_body = "\n".join(portfolio_html_rows) if portfolio_html_rows else "<tr><td colspan='11'>No portfolio positions yet.</td></tr>"
 
     day_labels = {1: "Tomorrow", 2: "2 days", 3: "3 days", 4: "4 days", 5: "5 days"}
     market_history_payload = []
@@ -516,273 +692,71 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
         if not run_date:
             continue
         forecasts = []
-        for row in sorted(entry.get("forecasts", []), key=lambda item: int(item.get("day", 0))):
-            day = int(row.get("day", 0))
-            forecasts.append({
-                "day": day,
-                "percentage": float(row.get("percentage", 0) or 0),
-                "confidence": float(row.get("confidence", 0) or 0),
-                "label": day_labels.get(day, f"{day} days"),
-            })
+        for r in sorted(entry.get("forecasts", []), key=lambda item: int(item.get("day", 0))):
+            day = int(r.get("day", 0))
+            forecasts.append({"day": day, "percentage": float(r.get("percentage", 0) or 0), "confidence": float(r.get("confidence", 0) or 0), "label": day_labels.get(day, f"{day} days")})
         market_history_payload.append({"run_date": run_date, "forecasts": forecasts})
-
     market_history_json = json.dumps(market_history_payload)
 
-    html_content = f"""<!doctype html>
-<html lang=\"en\">
-<head>
-  <meta charset=\"utf-8\" />
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-  <title>Stock Tracker Dashboard</title>
+    def _build_page(main_sections_html, page_title):
+        rec_active = "active" if "Recommendation List" in page_title else ""
+        portfolio_active = "active" if "Portfolio" in page_title else ""
+        return """<!doctype html>
+<html lang="en"><head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>__PAGE_TITLE__</title>
   <style>
-    :root {{
-      --bg: #0b1220;
-      --panel: #121b2d;
-      --panel-soft: #1b2740;
-      --line: #2a3c60;
-      --text: #eef3ff;
-      --muted: #9caece;
-      --accent: #4da3ff;
-      --good: #38d996;
-      --shadow: rgba(5, 10, 20, 0.45);
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      color: var(--text);
-      background: radial-gradient(circle at 15% -10%, #1c3360 0%, var(--bg) 52%);
-      min-height: 100vh;
-    }}
-    .page {{ max-width: 1360px; margin: 0 auto; padding: 1.5rem; }}
-    .header {{
-      background: linear-gradient(135deg, rgba(77,163,255,.18), rgba(18,27,45,.85));
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: 1.2rem 1.4rem;
-      margin-bottom: 1rem;
-      box-shadow: 0 10px 30px var(--shadow);
-    }}
-    h1 {{ margin: 0; font-size: 1.4rem; letter-spacing: .01em; }}
-    .meta {{ margin-top: .45rem; color: var(--muted); font-size: .92rem; }}
-    .layout {{ display: flex; gap: 1rem; align-items: flex-start; }}
-    .main {{ flex: 1 1 auto; min-width: 0; display: grid; gap: 1rem; }}
-    .right {{ width: 340px; max-width: 100%; position: sticky; top: 1rem; }}
-    .card {{
-      background: linear-gradient(180deg, rgba(27,39,64,.98), rgba(18,27,45,.98));
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 1rem;
-      box-shadow: 0 8px 24px var(--shadow);
-    }}
-    h2 {{ margin: 0 0 .8rem 0; font-size: 1.04rem; }}
-    table {{ width: 100%; border-collapse: collapse; font-size: .92rem; }}
-    th, td {{ border-bottom: 1px solid rgba(156,174,206,.2); padding: .62rem .55rem; text-align: left; }}
-    th {{ color: #d6e4ff; font-weight: 600; user-select: none; }}
-    th.sortable {{ cursor: pointer; }}
-    th.sortable::after {{ content: ' ↕'; color: #84a6df; font-size: .85em; }}
-    tr:hover td {{ background: rgba(77,163,255,.08); }}
-    .tv-link {{ color: var(--accent); text-decoration: none; font-weight: 600; }}
-    .tv-link:hover {{ text-decoration: underline; }}
-    .pill {{ background: rgba(56,217,150,.17); color: var(--good); border: 1px solid rgba(56,217,150,.4); border-radius: 999px; padding: .25rem .55rem; font-size: .75rem; }}
-    .forecast-text {{ color: var(--muted); font-size: .94rem; line-height: 1.5; margin: .3rem 0 0 0; }}
-    .forecast-grid {{ display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .45rem; }}
-    .forecast-card {{ background: var(--panel-soft); border: 1px solid var(--line); border-radius: 10px; padding: .45rem .55rem; min-width: 132px; }}
-    .forecast-label {{ font-size: .8rem; color: #dbe7ff; margin: 0 0 .35rem 0; font-weight: 600; }}
-    .forecast-value {{ display: inline-block; font-size: .82rem; font-weight: 700; border-radius: 6px; padding: .15rem .45rem; }}
-    .forecast-value.positive {{ background: rgba(56, 217, 150, .25); color: #b4ffd9; border: 1px solid rgba(56, 217, 150, .55); }}
-    .forecast-value.negative {{ background: rgba(255, 107, 107, .22); color: #ffd2d2; border: 1px solid rgba(255, 107, 107, .5); }}
-    .forecast-conf {{ margin-top: .35rem; color: var(--muted); font-size: .75rem; }}
-    .forecast-tabs {{ display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .75rem; }}
-    .forecast-tab {{ border: 1px solid var(--line); border-radius: 999px; background: var(--panel-soft); color: var(--text); padding: .2rem .65rem; font-size: .78rem; cursor: pointer; }}
-    .forecast-tab.active {{ border-color: var(--accent); color: var(--accent); }}
-    .footer {{ color: var(--muted); font-size: .86rem; text-align: right; margin-top: 1rem; }}
-    @media (max-width: 1080px) {{
-      .layout {{ flex-direction: column; }}
-      .right {{ width: 100%; position: static; }}
-    }}
+    :root {--bg:#0b1220;--panel:#121b2d;--panel-soft:#1b2740;--line:#2a3c60;--text:#eef3ff;--muted:#9caece;--accent:#4da3ff;--shadow:rgba(5,10,20,.45);} * { box-sizing:border-box; }
+    body { margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text);background:radial-gradient(circle at 15% -10%, #1c3360 0%, var(--bg) 52%);min-height:100vh; }
+    .page { max-width:1360px;margin:0 auto;padding:1.5rem; } .header { background:linear-gradient(135deg, rgba(77,163,255,.18), rgba(18,27,45,.85));border:1px solid var(--line);border-radius:16px;padding:1.2rem 1.4rem;margin-bottom:1rem;box-shadow:0 10px 30px var(--shadow); }
+    .meta { margin-top:.45rem;color:var(--muted);font-size:.92rem; } .nav { margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap; }
+    .nav a { color:var(--text);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:.22rem .75rem;background:var(--panel-soft);font-size:.85rem; } .nav a.active { border-color:var(--accent);color:var(--accent); }
+    .card { background:linear-gradient(180deg, rgba(27,39,64,.98), rgba(18,27,45,.98));border:1px solid var(--line);border-radius:14px;padding:1rem;box-shadow:0 8px 24px var(--shadow);margin-bottom:1rem; }
+    table { width:100%; border-collapse:collapse; font-size:.92rem; } th,td { border-bottom:1px solid rgba(156,174,206,.2); padding:.62rem .55rem; text-align:left; } th.sortable { cursor:pointer; } th.sortable::after { content:' ↕'; color:#84a6df;font-size:.85em; }
+    .tv-link { color:var(--accent); text-decoration:none; font-weight:600; } .footer { color:var(--muted); font-size:.86rem; text-align:right; margin-top:1rem; }
+    .forecast-text { color: var(--muted); font-size: .94rem; line-height: 1.5; margin: .3rem 0 0 0; } .forecast-grid { display:flex;flex-wrap:wrap;gap:.55rem;margin-top:.45rem; }
+    .forecast-card { background:var(--panel-soft);border:1px solid var(--line);border-radius:10px;padding:.45rem .55rem;min-width:132px; } .forecast-label { font-size:.8rem;color:#dbe7ff;margin:0 0 .35rem 0;font-weight:600; }
+    .forecast-value { display:inline-block;font-size:.82rem;font-weight:700;border-radius:6px;padding:.15rem .45rem; } .forecast-value.positive { background:rgba(56,217,150,.25);color:#b4ffd9;border:1px solid rgba(56,217,150,.55); } .forecast-value.negative { background:rgba(255,107,107,.22);color:#ffd2d2;border:1px solid rgba(255,107,107,.5); }
+    .forecast-conf { margin-top:.35rem;color:var(--muted);font-size:.75rem; } .forecast-tabs { display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.75rem; } .forecast-tab { border:1px solid var(--line);border-radius:999px;background:var(--panel-soft);color:var(--text);padding:.2rem .65rem;font-size:.78rem;cursor:pointer; } .forecast-tab.active { border-color:var(--accent);color:var(--accent); }
   </style>
-</head>
-<body>
-  <main class=\"page\">
-    <section class=\"header\">
-      <h1>Stock Tracker Dashboard <span class=\"pill\">TradingView-style</span></h1>
-      <p class=\"meta\">Auto-generated from <code>{html.escape(source_csv)}</code> at {generated_at}. Click any table header to sort by column.</p>
-    </section>
+</head><body><main class="page"><section class="header"><h1>Stock Tracker Dashboard</h1><p class="meta">Auto-generated from <code>__SOURCE_CSV__</code> at __GENERATED_AT__. Click table headers to sort.</p><nav class="nav"><a href="index.html" class="__REC_ACTIVE__">Recommendations</a><a href="portfolio.html" class="__PORT_ACTIVE__">Portfolio & Watchlist</a></nav></section>__MAIN_SECTIONS__<footer class="footer">Last updated at: __GENERATED_AT__</footer></main>
+<script>
+(function () {
+const marketHistory = __MARKET_HISTORY_JSON__;
+const forecastText = document.getElementById('sp500-forecast-text');
+const forecastTabs = document.getElementById('sp500-forecast-tabs');
+const formatForecast = (row) => { const pct=Number(row?.percentage ?? 0); const conf=Number(row?.confidence ?? 0); const pctLabel=`${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`; const signClass=pct >= 0 ? 'positive' : 'negative'; return `<div class="forecast-card"><p class="forecast-label">${row?.label || 'N/A'}</p><span class="forecast-value ${signClass}">${pctLabel}</span><div class="forecast-conf">conf ${conf.toFixed(1)}%</div></div>`; };
+const renderForecast = (rows) => { if(!forecastText) return; if(!rows || rows.length === 0){ forecastText.textContent='No S&P 500 forecast data yet. Run a daily scan to generate it.'; return; } forecastText.innerHTML=`<div class="forecast-grid">${rows.map(formatForecast).join('')}</div>`; };
+const renderForecastTabs = () => { if(!forecastTabs) return; forecastTabs.innerHTML=''; if(!marketHistory || marketHistory.length === 0){ renderForecast([]); return; } let selected = marketHistory[0].run_date; const selectDate = (runDate) => { selected = runDate; Array.from(forecastTabs.querySelectorAll('button')).forEach((btn) => btn.classList.toggle('active', btn.dataset.runDate === selected)); const row = marketHistory.find((item) => item.run_date === selected); renderForecast(row?.forecasts || []); }; marketHistory.forEach((item) => { const button=document.createElement('button'); button.type='button'; button.className='forecast-tab'; button.dataset.runDate=item.run_date; const parsed=new Date(`${item.run_date}T00:00:00`); button.textContent=Number.isNaN(parsed.valueOf()) ? item.run_date : parsed.toLocaleDateString(undefined, { month:'short', day:'2-digit' }); button.addEventListener('click', () => selectDate(item.run_date)); forecastTabs.appendChild(button); }); selectDate(selected); };
+renderForecastTabs();
+const collator = new Intl.Collator(undefined, { numeric:true, sensitivity:'base' });
+document.querySelectorAll('.sortable-table').forEach((table) => { const headers = table.querySelectorAll('th.sortable'); headers.forEach((header, index) => { let asc=false; header.addEventListener('click', () => { const tbody = table.querySelector('tbody'); const rows = Array.from(tbody.querySelectorAll('tr')); asc = !asc; rows.sort((a,b) => { const aCell=a.children[index]; const bCell=b.children[index]; const aVal=aCell?.getAttribute('data-sort-value') ?? aCell?.innerText ?? ''; const bVal=bCell?.getAttribute('data-sort-value') ?? bCell?.innerText ?? ''; const aNum=Number(aVal.replace(/[^0-9+-.]/g,'')); const bNum=Number(bVal.replace(/[^0-9+-.]/g,'')); if(!Number.isNaN(aNum) && !Number.isNaN(bNum) && aVal.trim() !== '' && bVal.trim() !== '') return asc ? aNum - bNum : bNum - aNum; return asc ? collator.compare(aVal,bVal) : collator.compare(bVal,aVal); }); rows.forEach((row) => tbody.appendChild(row)); }); }); });
+})();
+</script></body></html>""".replace("__PAGE_TITLE__", page_title).replace("__SOURCE_CSV__", html.escape(source_csv)).replace("__GENERATED_AT__", generated_at).replace("__REC_ACTIVE__", rec_active).replace("__PORT_ACTIVE__", portfolio_active).replace("__MAIN_SECTIONS__", main_sections_html).replace("__MARKET_HISTORY_JSON__", market_history_json)
 
-    <section class=\"layout\">
-      <div class=\"main\">
-        <section class=\"card\">
-          <h2>S&amp;P 500 Forecast (next 5 trading days)</h2>
-          <p id=\"sp500-forecast-text\" class=\"forecast-text\">No S&amp;P 500 forecast data yet. Run a daily scan to generate it.</p>
-          <div id=\"sp500-forecast-tabs\" class=\"forecast-tabs\"></div>
-        </section>
+    rec_sections = f"""
+    <section class="card"><h2>S&amp;P 500 Forecast (next 5 trading days)</h2><p id="sp500-forecast-text" class="forecast-text">No S&amp;P 500 forecast data yet. Run a daily scan to generate it.</p><div id="sp500-forecast-tabs" class="forecast-tabs"></div></section>
+    <section class="card"><h2>Recommendation List</h2><table class="sortable-table"><thead><tr><th class="sortable">Stock Name</th><th class="sortable">Ticker</th><th class="sortable">Expected 5D Return</th><th class="sortable">Confidence</th><th class="sortable">Market Cap</th><th>TradingView</th></tr></thead><tbody>{rec_body}</tbody></table></section>
+    """
 
-        <section class=\"card\">
-          <h2>Recommendation List</h2>
-          <table class=\"sortable-table\">
-            <thead>
-              <tr>
-                <th class=\"sortable\">Stock Name</th>
-                <th class=\"sortable\">Ticker</th>
-                <th class=\"sortable\">Expected 5D Return</th>
-                <th class=\"sortable\">Confidence</th>
-                <th class=\"sortable\">Market Cap</th>
-                <th>TradingView</th>
-              </tr>
-            </thead>
-            <tbody>
-              {table_body}
-            </tbody>
-          </table>
-        </section>
-
-        <section class=\"card\">
-          <h2>Portfolio</h2>
-          <table class=\"sortable-table\">
-            <thead>
-              <tr>
-                <th class=\"sortable\">Ticker</th>
-                <th class=\"sortable\">Stock Name</th>
-                <th class=\"sortable\">Shares</th>
-                <th class=\"sortable\">Cost Basis</th>
-                <th class=\"sortable\">Total Cost</th>
-                <th>TradingView</th>
-              </tr>
-            </thead>
-            <tbody>
-              {portfolio_body}
-            </tbody>
-          </table>
-        </section>
-      </div>
-
-      <aside class=\"right\">
-        <section class=\"card\">
-          <h2>Watchlist</h2>
-          <table class=\"sortable-table\">
-            <thead>
-              <tr>
-                <th class=\"sortable\">Ticker</th>
-                <th class=\"sortable\">Name</th>
-                <th>TradingView</th>
-              </tr>
-            </thead>
-            <tbody>
-              {watchlist_body}
-            </tbody>
-          </table>
-        </section>
-      </aside>
-    </section>
-    <footer class="footer">Last updated at: {generated_at}</footer>
-  </main>
-
-  <script>
-    (function () {{
-      const marketHistory = {market_history_json};
-      const forecastText = document.getElementById('sp500-forecast-text');
-      const forecastTabs = document.getElementById('sp500-forecast-tabs');
-
-      const formatForecast = (row) => {{
-        const pct = Number(row?.percentage ?? 0);
-        const conf = Number(row?.confidence ?? 0);
-        const pctLabel = `${{pct >= 0 ? '+' : ''}}${{pct.toFixed(2)}}%`;
-        const signClass = pct >= 0 ? 'positive' : 'negative';
-        return `
-          <div class="forecast-card">
-            <p class="forecast-label">${{row?.label || 'N/A'}}</p>
-            <span class="forecast-value ${{signClass}}">${{pctLabel}}</span>
-            <div class="forecast-conf">conf ${{conf.toFixed(1)}}%</div>
-          </div>
-        `;
-      }};
-
-      const renderForecast = (rows) => {{
-        if (!forecastText) return;
-        if (!rows || rows.length === 0) {{
-          forecastText.textContent = 'No S&P 500 forecast data yet. Run a daily scan to generate it.';
-          return;
-        }}
-        forecastText.innerHTML = `<div class="forecast-grid">${{rows.map(formatForecast).join('')}}</div>`;
-      }};
-
-      const renderForecastTabs = () => {{
-        if (!forecastTabs) return;
-        forecastTabs.innerHTML = '';
-        if (!marketHistory || marketHistory.length === 0) {{
-          renderForecast([]);
-          return;
-        }}
-
-        let selected = marketHistory[0].run_date;
-        const selectDate = (runDate) => {{
-          selected = runDate;
-          Array.from(forecastTabs.querySelectorAll('button')).forEach((btn) => {{
-            btn.classList.toggle('active', btn.dataset.runDate === selected);
-          }});
-          const row = marketHistory.find((item) => item.run_date === selected);
-          renderForecast(row?.forecasts || []);
-        }};
-
-        marketHistory.forEach((item) => {{
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.className = 'forecast-tab';
-          button.dataset.runDate = item.run_date;
-          const parsed = new Date(`${{item.run_date}}T00:00:00`);
-          button.textContent = Number.isNaN(parsed.valueOf())
-            ? item.run_date
-            : parsed.toLocaleDateString(undefined, {{ month: 'short', day: '2-digit' }});
-          button.addEventListener('click', () => selectDate(item.run_date));
-          forecastTabs.appendChild(button);
-        }});
-
-        selectDate(selected);
-      }};
-
-      renderForecastTabs();
-
-      const collator = new Intl.Collator(undefined, {{ numeric: true, sensitivity: 'base' }});
-      document.querySelectorAll('.sortable-table').forEach((table) => {{
-        const headers = table.querySelectorAll('th.sortable');
-        headers.forEach((header, index) => {{
-          let asc = false;
-          header.addEventListener('click', () => {{
-            const tbody = table.querySelector('tbody');
-            const rows = Array.from(tbody.querySelectorAll('tr'));
-            asc = !asc;
-            rows.sort((a, b) => {{
-              const aCell = a.children[index];
-              const bCell = b.children[index];
-              const aVal = aCell?.getAttribute('data-sort-value') ?? aCell?.innerText ?? '';
-              const bVal = bCell?.getAttribute('data-sort-value') ?? bCell?.innerText ?? '';
-
-              const aNum = Number(aVal.replace(/[^0-9+-.]/g, ''));
-              const bNum = Number(bVal.replace(/[^0-9+-.]/g, ''));
-              if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && aVal.trim() !== '' && bVal.trim() !== '') {{
-                return asc ? aNum - bNum : bNum - aNum;
-              }}
-              return asc ? collator.compare(aVal, bVal) : collator.compare(bVal, aVal);
-            }});
-            rows.forEach((row) => tbody.appendChild(row));
-          }});
-        }});
-      }});
-    }})();
-  </script>
-</body>
-</html>
-"""
+    portfolio_sections = f"""
+    <section class="card"><h2>Portfolio</h2><table class="sortable-table"><thead><tr><th class="sortable">Ticker</th><th class="sortable">Stock Name</th><th class="sortable">Shares</th><th class="sortable">Cost Basis</th><th class="sortable">Total Cost</th><th class="sortable">Current Price</th><th class="sortable">P&amp;L</th><th class="sortable">P&amp;L %</th><th class="sortable">AI 5D</th><th class="sortable">Signal</th><th>TradingView</th></tr></thead><tbody>{portfolio_body}</tbody></table></section>
+    <section class="card"><h2>Watchlist (AI 5-day prediction)</h2><table class="sortable-table"><thead><tr><th class="sortable">Ticker</th><th class="sortable">Name</th><th class="sortable">AI 5D Return</th><th>TradingView</th></tr></thead><tbody>{watch_body}</tbody></table></section>
+    """
 
     with open(output_html, "w", encoding="utf-8") as f:
-        f.write(html_content)
+        f.write(_build_page(rec_sections, "Stock Tracker - Recommendation List"))
+
+    portfolio_path = PAGES_PORTFOLIO_PATH
+    with open(portfolio_path, "w", encoding="utf-8") as f:
+        f.write(_build_page(portfolio_sections, "Stock Tracker - Portfolio"))
 
     with open(PAGES_NOJEKYLL_PATH, "w", encoding="utf-8") as f:
         f.write("")
 
-    print(f"GitHub Pages report generated: {output_html}")
-
+    print(f"Generated GitHub Pages dashboard: {output_html}")
+    print(f"Generated GitHub Pages portfolio page: {portfolio_path}")
 
 def auto_commit_and_push_pages(paths_to_commit):
     """Commit and push generated report files so GitHub Pages updates automatically."""
