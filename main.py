@@ -712,6 +712,9 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
     .page { max-width:1360px;margin:0 auto;padding:1.5rem; } .header { background:linear-gradient(135deg, rgba(77,163,255,.18), rgba(18,27,45,.85));border:1px solid var(--line);border-radius:16px;padding:1.2rem 1.4rem;margin-bottom:1rem;box-shadow:0 10px 30px var(--shadow); }
     .meta { margin-top:.45rem;color:var(--muted);font-size:.92rem; } .nav { margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap; }
     .nav a { color:var(--text);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:.22rem .75rem;background:var(--panel-soft);font-size:.85rem; } .nav a.active { border-color:var(--accent);color:var(--accent); }
+    .layout { display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:1rem;align-items:start; }
+    .main-column { min-width:0; }
+    .sidebar-column { position:sticky;top:1rem;max-height:calc(100vh - 2rem);overflow:auto; }
     .card { background:linear-gradient(180deg, rgba(27,39,64,.98), rgba(18,27,45,.98));border:1px solid var(--line);border-radius:14px;padding:1rem;box-shadow:0 8px 24px var(--shadow);margin-bottom:1rem; }
     table { width:100%; border-collapse:collapse; font-size:.92rem; } th,td { border-bottom:1px solid rgba(156,174,206,.2); padding:.62rem .55rem; text-align:left; } th.sortable { cursor:pointer; } th.sortable::after { content:' ↕'; color:#84a6df;font-size:.85em; }
     .tv-link { color:var(--accent); text-decoration:none; font-weight:600; } .footer { color:var(--muted); font-size:.86rem; text-align:right; margin-top:1rem; }
@@ -719,8 +722,9 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
     .forecast-card { background:var(--panel-soft);border:1px solid var(--line);border-radius:10px;padding:.45rem .55rem;min-width:132px; } .forecast-label { font-size:.8rem;color:#dbe7ff;margin:0 0 .35rem 0;font-weight:600; }
     .forecast-value { display:inline-block;font-size:.82rem;font-weight:700;border-radius:6px;padding:.15rem .45rem; } .forecast-value.positive { background:rgba(56,217,150,.25);color:#b4ffd9;border:1px solid rgba(56,217,150,.55); } .forecast-value.negative { background:rgba(255,107,107,.22);color:#ffd2d2;border:1px solid rgba(255,107,107,.5); }
     .forecast-conf { margin-top:.35rem;color:var(--muted);font-size:.75rem; } .forecast-tabs { display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.75rem; } .forecast-tab { border:1px solid var(--line);border-radius:999px;background:var(--panel-soft);color:var(--text);padding:.2rem .65rem;font-size:.78rem;cursor:pointer; } .forecast-tab.active { border-color:var(--accent);color:var(--accent); }
+    @media (max-width: 1080px) { .layout { grid-template-columns:1fr; } .sidebar-column { position:static;max-height:none;overflow:visible; } }
   </style>
-</head><body><main class="page"><section class="header"><h1>Stock Tracker Dashboard</h1><p class="meta">Auto-generated from <code>__SOURCE_CSV__</code> at __GENERATED_AT__. Click table headers to sort.</p><nav class="nav"><a href="index.html" class="__REC_ACTIVE__">Recommendations</a><a href="portfolio.html" class="__PORT_ACTIVE__">Portfolio & Watchlist</a></nav></section>__MAIN_SECTIONS__<footer class="footer">Last updated at: __GENERATED_AT__</footer></main>
+</head><body><main class="page"><section class="header"><h1>Stock Tracker Dashboard</h1><p class="meta">Auto-generated from <code>__SOURCE_CSV__</code> at __GENERATED_AT__. Click table headers to sort.</p><nav class="nav"><a href="index.html" class="__REC_ACTIVE__">Recommendations</a><a href="portfolio.html" class="__PORT_ACTIVE__">Portfolio & Watchlist</a></nav></section><div class="layout"><div class="main-column">__MAIN_SECTIONS__</div><aside class="sidebar-column">__WATCHLIST_SECTION__</aside></div><footer class="footer">Last updated at: __GENERATED_AT__</footer></main>
 <script>
 (function () {
 const marketHistory = __MARKET_HISTORY_JSON__;
@@ -733,7 +737,7 @@ renderForecastTabs();
 const collator = new Intl.Collator(undefined, { numeric:true, sensitivity:'base' });
 document.querySelectorAll('.sortable-table').forEach((table) => { const headers = table.querySelectorAll('th.sortable'); headers.forEach((header, index) => { let asc=false; header.addEventListener('click', () => { const tbody = table.querySelector('tbody'); const rows = Array.from(tbody.querySelectorAll('tr')); asc = !asc; rows.sort((a,b) => { const aCell=a.children[index]; const bCell=b.children[index]; const aVal=aCell?.getAttribute('data-sort-value') ?? aCell?.innerText ?? ''; const bVal=bCell?.getAttribute('data-sort-value') ?? bCell?.innerText ?? ''; const aNum=Number(aVal.replace(/[^0-9+-.]/g,'')); const bNum=Number(bVal.replace(/[^0-9+-.]/g,'')); if(!Number.isNaN(aNum) && !Number.isNaN(bNum) && aVal.trim() !== '' && bVal.trim() !== '') return asc ? aNum - bNum : bNum - aNum; return asc ? collator.compare(aVal,bVal) : collator.compare(bVal,aVal); }); rows.forEach((row) => tbody.appendChild(row)); }); }); });
 })();
-</script></body></html>""".replace("__PAGE_TITLE__", page_title).replace("__SOURCE_CSV__", html.escape(source_csv)).replace("__GENERATED_AT__", generated_at).replace("__REC_ACTIVE__", rec_active).replace("__PORT_ACTIVE__", portfolio_active).replace("__MAIN_SECTIONS__", main_sections_html).replace("__MARKET_HISTORY_JSON__", market_history_json)
+</script></body></html>""".replace("__PAGE_TITLE__", page_title).replace("__SOURCE_CSV__", html.escape(source_csv)).replace("__GENERATED_AT__", generated_at).replace("__REC_ACTIVE__", rec_active).replace("__PORT_ACTIVE__", portfolio_active).replace("__MAIN_SECTIONS__", main_sections_html).replace("__WATCHLIST_SECTION__", watchlist_section).replace("__MARKET_HISTORY_JSON__", market_history_json)
 
     rec_sections = f"""
     <section class="card"><h2>S&amp;P 500 Forecast (next 5 trading days)</h2><p id="sp500-forecast-text" class="forecast-text">No S&amp;P 500 forecast data yet. Run a daily scan to generate it.</p><div id="sp500-forecast-tabs" class="forecast-tabs"></div></section>
@@ -742,6 +746,9 @@ document.querySelectorAll('.sortable-table').forEach((table) => { const headers 
 
     portfolio_sections = f"""
     <section class="card"><h2>Portfolio</h2><table class="sortable-table"><thead><tr><th class="sortable">Ticker</th><th class="sortable">Stock Name</th><th class="sortable">Shares</th><th class="sortable">Cost Basis</th><th class="sortable">Total Cost</th><th class="sortable">Current Price</th><th class="sortable">P&amp;L</th><th class="sortable">P&amp;L %</th><th class="sortable">AI 5D</th><th class="sortable">Signal</th><th>TradingView</th></tr></thead><tbody>{portfolio_body}</tbody></table></section>
+    """
+
+    watchlist_section = f"""
     <section class="card"><h2>Watchlist (AI 5-day prediction)</h2><table class="sortable-table"><thead><tr><th class="sortable">Ticker</th><th class="sortable">Name</th><th class="sortable">AI 5D Return</th><th>TradingView</th></tr></thead><tbody>{watch_body}</tbody></table></section>
     """
 
