@@ -393,6 +393,37 @@ def _format_market_cap(value):
     return f"${n:.0f}"
 
 
+def _build_stock_name_map(report_df, watchlist_rows, portfolio_rows):
+    """Resolve ticker->stock name for tables beyond the recommendation list."""
+    name_map = {}
+
+    if report_df is not None and not report_df.empty:
+        for _, row in report_df.iterrows():
+            symbol = str(row.get("ticker", "")).upper().strip()
+            stock_name = str(row.get("stock_name", "")).strip()
+            if symbol and stock_name:
+                name_map[symbol] = stock_name
+
+    pending_symbols = set()
+    for row in watchlist_rows + portfolio_rows:
+        symbol = str(row.get("ticker", "")).upper().strip()
+        stock_name = str(row.get("stock_name", "")).strip()
+        if not symbol:
+            continue
+        if stock_name:
+            name_map[symbol] = stock_name
+        elif symbol not in name_map:
+            pending_symbols.add(symbol)
+
+    for symbol in sorted(pending_symbols):
+        metadata = get_ticker_metadata(symbol)
+        stock_name = str(metadata.get("stock_name") or "").strip()
+        if stock_name:
+            name_map[symbol] = stock_name
+
+    return name_map
+
+
 def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_INDEX_PATH):
     """Render a modern, sortable GitHub Pages dashboard from local signal/watchlist data."""
     os.makedirs(os.path.dirname(output_html), exist_ok=True)
@@ -407,6 +438,7 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
 
     watchlist_rows = _load_watchlist_rows()
     portfolio_rows = _load_portfolio_rows()
+    stock_name_map = _build_stock_name_map(report_df, watchlist_rows, portfolio_rows)
     market_history_rows = load_recent_sp500_forecast_history(days_to_keep=5)
 
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -448,9 +480,11 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
 
     watchlist_html_rows = []
     for row in watchlist_rows:
-        ticker = html.escape(row["ticker"])
-        name = html.escape(row["stock_name"] or "-")
-        tv_symbol = _to_tv_symbol(row["ticker"])
+        raw_ticker = str(row.get("ticker", "")).upper().strip()
+        ticker = html.escape(raw_ticker)
+        resolved_name = row.get("stock_name") or stock_name_map.get(raw_ticker) or raw_ticker
+        name = html.escape(str(resolved_name or "-").strip() or "-")
+        tv_symbol = _to_tv_symbol(raw_ticker)
         trading_view_link = (
             f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}' target='_blank' rel='noopener noreferrer'>Chart ↗</a>"
             if tv_symbol
@@ -461,17 +495,19 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
 
     portfolio_html_rows = []
     for row in portfolio_rows:
-        ticker = html.escape(row["ticker"])
-        tv_symbol = _to_tv_symbol(row["ticker"])
+        raw_ticker = str(row.get("ticker", "")).upper().strip()
+        ticker = html.escape(raw_ticker)
+        resolved_name = stock_name_map.get(raw_ticker) or raw_ticker
+        tv_symbol = _to_tv_symbol(raw_ticker)
         trading_view_link = (
             f"<a class='tv-link' href='https://www.tradingview.com/symbols/{html.escape(tv_symbol)}' target='_blank' rel='noopener noreferrer'>Chart ↗</a>"
             if tv_symbol
             else "-"
         )
         portfolio_html_rows.append(
-            f"<tr><td>{ticker}</td><td data-sort-value='{row['shares']:.4f}'>{row['shares']:.4f}</td><td data-sort-value='{row['cost_basis']:.4f}'>${row['cost_basis']:.2f}</td><td data-sort-value='{row['position_cost']:.2f}'>${row['position_cost']:.2f}</td><td>{trading_view_link}</td></tr>"
+            f"<tr><td>{ticker}</td><td>{html.escape(str(resolved_name))}</td><td data-sort-value='{row['shares']:.4f}'>{row['shares']:.4f}</td><td data-sort-value='{row['cost_basis']:.4f}'>${row['cost_basis']:.2f}</td><td data-sort-value='{row['position_cost']:.2f}'>${row['position_cost']:.2f}</td><td>{trading_view_link}</td></tr>"
         )
-    portfolio_body = "\n".join(portfolio_html_rows) if portfolio_html_rows else "<tr><td colspan='5'>No portfolio positions yet.</td></tr>"
+    portfolio_body = "\n".join(portfolio_html_rows) if portfolio_html_rows else "<tr><td colspan='6'>No portfolio positions yet.</td></tr>"
 
     day_labels = {1: "Tomorrow", 2: "2 days", 3: "3 days", 4: "4 days", 5: "5 days"}
     market_history_payload = []
@@ -600,6 +636,7 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
             <thead>
               <tr>
                 <th class=\"sortable\">Ticker</th>
+                <th class=\"sortable\">Stock Name</th>
                 <th class=\"sortable\">Shares</th>
                 <th class=\"sortable\">Cost Basis</th>
                 <th class=\"sortable\">Total Cost</th>

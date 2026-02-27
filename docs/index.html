@@ -38,6 +38,9 @@
     .layout { display: flex; gap: 1rem; align-items: flex-start; }
     .main { flex: 1 1 auto; min-width: 0; display: grid; gap: 1rem; }
     .right { width: 340px; max-width: 100%; position: sticky; top: 1rem; }
+    .top-nav { display: flex; gap: .55rem; margin-bottom: .9rem; }
+    .top-nav-btn { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px; padding: .4rem .85rem; font-size: .86rem; cursor: pointer; }
+    .top-nav-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(77,163,255,.12); }
     .card {
       background: linear-gradient(180deg, rgba(27,39,64,.98), rgba(18,27,45,.98));
       border: 1px solid var(--line);
@@ -75,13 +78,17 @@
 
     <section class="layout">
       <div class="main">
-        <section class="card">
+        <nav class="top-nav" aria-label="Dashboard sections">
+          <button class="top-nav-btn active" type="button" data-view="recommendations">Rec List</button>
+          <button class="top-nav-btn" type="button" data-view="portfolio">Portfolio</button>
+        </nav>
+        <section class="card recommendations-view">
           <h2>S&amp;P 500 Forecast (next 5 trading days)</h2>
           <p id="sp500-forecast-text" class="forecast-text">No S&amp;P 500 forecast data yet. Run a daily scan to generate it.</p>
           <div id="sp500-forecast-tabs" class="forecast-tabs"></div>
         </section>
 
-        <section class="card">
+        <section class="card recommendations-view">
           <h2>Recommendation List</h2>
           <table class="sortable-table">
             <thead>
@@ -3849,7 +3856,7 @@
           </table>
         </section>
 
-        <section class="card">
+        <section class="card portfolio-view" style="display:none;">
           <h2>Portfolio</h2>
           <table class="sortable-table">
             <thead>
@@ -3957,6 +3964,16 @@
       };
 
       renderForecastTabs();
+
+      const navButtons = Array.from(document.querySelectorAll('.top-nav-btn'));
+      const recommendationCards = Array.from(document.querySelectorAll('.recommendations-view'));
+      const portfolioCards = Array.from(document.querySelectorAll('.portfolio-view'));
+      const setView = (viewName) => {
+        navButtons.forEach((button) => button.classList.toggle('active', button.dataset.view === viewName));
+        recommendationCards.forEach((card) => { card.style.display = viewName === 'recommendations' ? '' : 'none'; });
+        portfolioCards.forEach((card) => { card.style.display = viewName === 'portfolio' ? '' : 'none'; });
+      };
+      navButtons.forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
 
       const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
       document.querySelectorAll('.sortable-table').forEach((table) => {
