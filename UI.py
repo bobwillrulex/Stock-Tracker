@@ -27,15 +27,16 @@ except ImportError:
 
 import main
 
-SIGNALS_CSV_PATH = "buy_signals.csv"
-MACD_SIGNALS_CSV_PATH = "macd_signals.csv"
-RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
-MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
-WATCHLIST_DB_PATH = "watchlist.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SIGNALS_CSV_PATH = os.path.join(BASE_DIR, "buy_signals.csv")
+MACD_SIGNALS_CSV_PATH = os.path.join(BASE_DIR, "macd_signals.csv")
+RSI_SIGNALS_CSV_PATH = os.path.join(BASE_DIR, "rsi_signals.csv")
+MARKET_FORECAST_CSV_PATH = os.path.join(BASE_DIR, "sp500_forecast.csv")
+WATCHLIST_DB_PATH = os.path.join(BASE_DIR, "watchlist.db")
 TV_LAYOUT_ID = "ClEM8BLT"
 FORECAST_TABS_DAYS_TO_KEEP = 5
 LIVE_SIGNAL_REFRESH_MS = 5 * 60 * 1000
-PORTFOLIO_DB_PATH = "portfolio.db"
+PORTFOLIO_DB_PATH = os.path.join(BASE_DIR, "portfolio.db")
 
 
 def _ensure_watchlist_table(conn):

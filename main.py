@@ -28,21 +28,22 @@ from torch.utils.data import DataLoader, TensorDataset
 # CONFIG & CONSTANTS
 # ==============================
 WINDOW_SIZE = 60          # Model looks at the last 60 trading days
-MODEL_PATH = "stock_model.pth" 
-BEST_MODEL_PATH = "stock_model_best.pth"
-STATE_PATH = "run_state.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "stock_model.pth")
+BEST_MODEL_PATH = os.path.join(BASE_DIR, "stock_model_best.pth")
+STATE_PATH = os.path.join(BASE_DIR, "run_state.json")
 RUN_HOUR = 16             # 4 PM
 RUN_MINUTE = 2            # 4:02 PM
-WEEKLY_STATE = "weekly_state.json"
-SIGNALS_CSV_PATH = "buy_signals.csv"
-MACD_SIGNALS_CSV_PATH = "macd_signals.csv"
-RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
-MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
-MARKET_FORECAST_DB_PATH = "sp500_forecast.db"
-LIVE_SIGNAL_DB_PATH = "live_trading_signals.db"
-STOCK_DETAIL_CACHE_DB_PATH = "stock_details_cache.db"
-WEB_REPORT_CACHE_DB_PATH = "web_report_cache.db"
-PAGES_DIR = "docs"
+WEEKLY_STATE = os.path.join(BASE_DIR, "weekly_state.json")
+SIGNALS_CSV_PATH = os.path.join(BASE_DIR, "buy_signals.csv")
+MACD_SIGNALS_CSV_PATH = os.path.join(BASE_DIR, "macd_signals.csv")
+RSI_SIGNALS_CSV_PATH = os.path.join(BASE_DIR, "rsi_signals.csv")
+MARKET_FORECAST_CSV_PATH = os.path.join(BASE_DIR, "sp500_forecast.csv")
+MARKET_FORECAST_DB_PATH = os.path.join(BASE_DIR, "sp500_forecast.db")
+LIVE_SIGNAL_DB_PATH = os.path.join(BASE_DIR, "live_trading_signals.db")
+STOCK_DETAIL_CACHE_DB_PATH = os.path.join(BASE_DIR, "stock_details_cache.db")
+WEB_REPORT_CACHE_DB_PATH = os.path.join(BASE_DIR, "web_report_cache.db")
+PAGES_DIR = os.path.join(BASE_DIR, "docs")
 PAGES_INDEX_PATH = os.path.join(PAGES_DIR, "index.html")
 PAGES_PORTFOLIO_PATH = os.path.join(PAGES_DIR, "portfolio.html")
 PAGES_NOJEKYLL_PATH = os.path.join(PAGES_DIR, ".nojekyll")
@@ -310,7 +311,7 @@ def write_technical_signals_csv(macd_signals, rsi_signals):
     print(f"Wrote {len(rsi_df)} RSI signals to {RSI_SIGNALS_CSV_PATH}.")
 
 
-def _load_watchlist_rows(path="watchlist.db"):
+def _load_watchlist_rows(path=os.path.join(BASE_DIR, "watchlist.db")):
     if not os.path.exists(path):
         return []
 
@@ -333,7 +334,7 @@ def _load_watchlist_rows(path="watchlist.db"):
     ]
 
 
-def _load_portfolio_rows(path="portfolio.db"):
+def _load_portfolio_rows(path=os.path.join(BASE_DIR, "portfolio.db")):
     if not os.path.exists(path):
         return []
 
@@ -767,7 +768,7 @@ document.querySelectorAll('.sortable-table').forEach((table) => { const headers 
 
 def auto_commit_and_push_pages(paths_to_commit):
     """Commit and push generated report files so GitHub Pages updates automatically."""
-    if not os.path.isdir(".git"):
+    if not os.path.isdir(os.path.join(BASE_DIR, ".git")):
         return
 
     auto_push = os.environ.get("STOCK_TRACKER_AUTO_PUSH", "1").lower() in {"1", "true", "yes", "on"}
@@ -777,11 +778,12 @@ def auto_commit_and_push_pages(paths_to_commit):
 
     try:
         for path in paths_to_commit:
-            subprocess.run(["git", "add", path], check=True)
+            subprocess.run(["git", "add", path], check=True, cwd=BASE_DIR)
 
         status = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
             check=False,
+            cwd=BASE_DIR,
         )
         if status.returncode == 0:
             print("No report changes detected; skipping git commit/push.")
@@ -789,8 +791,8 @@ def auto_commit_and_push_pages(paths_to_commit):
 
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         commit_message = f"chore: update stock recommendations ({timestamp})"
-        subprocess.run(["git", "commit", "-m", commit_message], check=True)
-        subprocess.run(["git", "push"], check=True)
+        subprocess.run(["git", "commit", "-m", commit_message], check=True, cwd=BASE_DIR)
+        subprocess.run(["git", "push"], check=True, cwd=BASE_DIR)
         print("Pushed latest recommendations to GitHub.")
     except Exception as exc:
         print(f"Auto push failed: {exc}")
@@ -817,7 +819,7 @@ def compute_confidence_score(model, X_val, y_val, pred):
     return float(np.clip(confidence, 0.0, 1.0))
 
 def get_tickers():
-    cache_file = "tickers_cache.json"
+    cache_file = os.path.join(BASE_DIR, "tickers_cache.json")
     min_expected_symbols = 100
 
     def load_cached_tickers():
