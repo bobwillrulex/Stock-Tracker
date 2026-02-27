@@ -1,0 +1,141 @@
+signal_type,stock_name,ticker,price,change_pct,marketcap
+2,Microsoft Corporation,MSFT,401.72,0.28,2985734963200
+2,"Tesla, Inc.",TSLA,408.58,-2.11,1533168582656
+1,TORONTO-DOMINION BANK,TD.TO,135.14,1.64,226860122112
+1,Thermo Fisher Scientific Inc,TMO,520.12,1.25,195413278720
+1,Walt Disney Company (The),DIS,105.55,0.48,187181006848
+2,Southern Copper Corporation,SCCO,215.7,0.23,178181636096
+3,Newmont Corporation,NEM,127.47,2.1,139103289344
+2,S&P Global Inc.,SPGI,437.49,3.28,132471971840
+2,Intuit Inc.,INTU,394.42,3.46,109806534656
+1,Intercontinental Exchange Inc.,ICE,162.89,1.6,92876382208
+2,Marsh,MRSH,185.29,2.31,90775363584
+2,"DoorDash, Inc.",DASH,180.41,4.25,77756448768
+1,Transdigm Group Incorporated,TDG,1314.26,1.48,74220945408
+3,"Republic Services, Inc.",RSG,224.59,1.35,69524881408
+2,Snowflake Inc.,SNOW,173.06,2.28,59221131264
+1,"Cheniere Energy, Inc.",LNG,232.51,5.36,51098279936
+2,"Nasdaq, Inc.",NDAQ,88.59,5.48,50584485888
+1,NUTRIEN LTD,NTR.TO,99.99,0.85,48583544832
+1,"Rockwell Automation, Inc.",ROK,411.3,2.22,46243766272
+1,RESTAURANT BRANDS INTERNATIONAL,QSR.TO,95.62,3.43,43572097024
+2,MSCI Inc.,MSCI,572.87,2.87,43045187584
+2,TECK RESOURCES LIMITED CL B,TECK-B.TO,83.44,-0.64,40737402880
+2,eBay Inc.,EBAY,87.9,3.01,40170299392
+1,"United Airlines Holdings, Inc.",UAL,116.43,3.15,37692813312
+1,"Workday, Inc.",WDAY,139.11,4.48,37142368256
+1,State Street Corporation,STT,132.27,0.49,36944658432
+3,Otis Worldwide Corporation,OTIS,91.46,2.27,35643408384
+1,"Paychex, Inc.",PAYX,94.48,3.56,33915246592
+2,"Block, Inc.",XYZ,54.53,4.99,33240614912
+1,Fair Isaac Corporation,FICO,1388.44,6.73,32936759296
+1,Xylem Inc.,XYL,131.93,2.86,32138145792
+1,Restaurant Brands International,QSR,69.89,3.36,31856881664
+2,FTAI Aviation Ltd.,FTAI,310.04,2.65,31801710592
+3,Halliburton Company,HAL,35.71,1.25,30054486016
+1,Willis Towers Watson Public Lim,WTW,308.29,3.86,29518342144
+3,TELUS CORPORATION,T.TO,18.72,1.52,29221918720
+1,"Zscaler, Inc.",ZS,167.36,7.49,26689099776
+2,Synchrony Financial,SYF,73.98,1.61,26645458944
+2,Expand Energy Corporation,EXE,106.29,0.23,25315057664
+3,Equity Residential,EQR,64.12,1.14,25143924736
+2,STERIS plc (Ireland),STE,254.7,1.22,24998043648
+1,"Royal Gold, Inc.",RGLD,294.38,2.41,24845103104
+2,"SoFi Technologies, Inc.",SOFI,19.1,-0.98,24357539840
+1,Labcorp Holdings Inc.,LH,287.62,1.71,23843696640
+1,Flutter Entertainment plc,FLUT,123.13,2.75,21580548096
+1,Principal Financial Group Inc,PFG,97.5,2.98,21420148736
+2,"T. Rowe Price Group, Inc.",TROW,96.46,1.25,21051140096
+1,Atlassian Corporation,TEAM,79.43,8.53,20949192704
+1,"VeriSign, Inc.",VRSN,225.29,5.03,20884381696
+2,"Illumina, Inc.",ILMN,127.4,4.54,19479459840
+2,"Super Micro Computer, Inc.",SMCI,32.28,-3.93,19335378944
+1,Fortive Corporation,FTV,59.8,2.54,18993176576
+2,"SS&C Technologies Holdings, Inc",SSNC,75.54,3.66,18448427008
+1,"TKO Group Holdings, Inc.",TKO,223.81,8.01,18383056896
+3,Blue Owl Capital Inc.,OWL,11.22,-1.15,17539254272
+3,SAPUTO INC.,SAP.TO,42.47,0.57,17211148288
+1,Annaly Capital Management Inc.,NLY,23.28,1.17,16724048896
+2,"Toast, Inc.",TOST,27.75,3.51,16344750080
+1,Mid-America Apartment Communiti,MAA,135.87,1.36,16307603456
+1,W. P. Carey Inc. REIT,WPC,74.25,1.17,16271581184
+3,Invitation Homes Inc.,INVH,26.3,2.65,16122441728
+1,Jones Lang LaSalle Incorporated,JLL,322.73,1.94,15291345920
+1,News Corporation,NWS,26.94,2.59,14932629504
+3,"UDR, Inc.",UDR,38.09,1.11,14340467712
+3,"Host Hotels & Resorts, Inc.",HST,20.3,2.99,14140500992
+2,News Corporation,NWSA,24.32,3.14,14138378240
+3,Gen Digital Inc.,GEN,22.8,2.29,14061126656
+1,Solventum Corporation,SOLV,76.94,2.48,13345054720
+1,"Neurocrine Biosciences, Inc.",NBIX,130.64,-0.39,13111482368
+1,The J.M. Smucker Company,SJM,116.0,8.82,12376542208
+1,Unum Group,UNM,73.82,1.85,12352394240
+1,Invesco Ltd,IVZ,27.09,1.16,12057566208
+2,"Pinterest, Inc.",PINS,17.81,1.37,12031684608
+1,GoDaddy Inc.,GDDY,86.2,8.95,11934305280
+1,"Houlihan Lokey, Inc.",HLI,169.1,1.87,11848620032
+3,Globe Life Inc.,GL,146.08,1.34,11832996864
+1,Millicom International Cellular,TIGO,70.68,5.97,11809567744
+3,Service Corporation Internation,SCI,83.45,3.34,11698134016
+1,DraftKings Inc.,DKNG,23.49,2.4,11692676096
+1,"Zillow Group, Inc.",Z,46.65,2.96,11297191936
+1,"Zillow Group, Inc.",ZG,46.52,2.4,11241849856
+3,MP Materials Corp.,MP,60.0,2.28,10633828352
+3,"Gap, Inc. (The)",GAP,28.28,4.05,10517946368
+1,MGM Resorts International,MGM,37.62,5.79,10289311744
+2,"Lineage, Inc.",LINE,40.97,1.29,10234192896
+1,SEI Investments Company,SEIC,83.3,1.83,10199202816
+1,FIRSTSERVICE CORPORATION,FSV.TO,216.6,2.02,9901271040
+3,U-Haul Holding Company,UHAL,50.52,0.6,9597682688
+3,"Rexford Industrial Realty, Inc.",REXR,37.88,1.42,9033225216
+2,Unity Software Inc.,U,19.58,5.38,8475398656
+1,"Manhattan Associates, Inc.",MANH,139.61,3.19,8412654080
+1,Primo Brands Corporation,PRMB,22.65,15.38,8386973696
+3,"SailPoint, Inc.",SAIL,14.37,7.48,8070561792
+1,Wingstop Inc.,WING,272.0,7.0,7558024192
+3,"Floor & Decor Holdings, Inc.",FND,70.14,2.38,7558014976
+3,Repligen Corporation,RGEN,133.65,1.14,7527892992
+1,"Nexstar Media Group, Inc.",NXST,246.16,5.86,7465095680
+3,UWM Holdings Corporation,UWMC,4.55,9.38,7309761024
+1,SiriusXM Holdings Inc.,SIRI,21.52,2.87,7242806272
+2,"Paycom Software, Inc.",PAYC,129.79,4.75,7126264320
+1,Parsons Corporation,PSN,66.31,1.73,7061257728
+2,First American Corporation (New,FAF,68.29,0.98,6958751232
+3,"STARWOOD PROPERTY TRUST, INC. S",STWD,18.1,2.14,6876756992
+3,"OneMain Holdings, Inc.",OMF,57.82,2.57,6807259136
+1,Elastic N.V.,ESTC,61.58,6.17,6544257024
+3,F.N.B. Corporation,FNB,18.01,0.95,6450039808
+3,Dolby Laboratories,DLB,65.44,1.8,6252125696
+1,Paylocity Holding Corporation,PCTY,112.62,8.52,6124456960
+3,Vornado Realty Trust,VNO,29.18,1.96,6091298816
+1,MGIC Investment Corporation,MTG,26.81,1.09,5808842240
+3,Rithm Capital Corp.,RITM,10.4,1.76,5781161984
+3,"UiPath, Inc.",PATH,10.71,7.75,5727169024
+1,"Lyft, Inc.",LYFT,14.1,5.22,5630883328
+3,"KBR, Inc.",KBR,42.04,3.01,5416502272
+3,"Millrose Properties, Inc.",MRP,31.11,0.35,5164368896
+1,"ExlService Holdings, Inc.",EXLS,30.99,8.09,5005292544
+2,"Doximity, Inc.",DOCS,25.1,2.87,4725608960
+1,"SentinelOne, Inc.",S,13.48,4.33,4581433856
+3,"MDU Resources Group, Inc.",MDU,20.44,0.29,4416224768
+3,QuantumScape Corporation,QS,7.26,3.27,4365512192
+1,Science Applications Internatio,SAIC,91.7,5.66,4220217344
+2,"H&R Block, Inc.",HRB,31.49,3.18,3991664128
+2,Kilroy Realty Corporation,KRC,32.02,1.59,3831309312
+3,Graphic Packaging Holding Compa,GPK,12.1,0.75,3571049728
+2,"Lucid Group, Inc.",LCID,10.59,3.02,3432943872
+2,"Hudson Pacific Properties, Inc.",HPP,7.69,20.91,3407655168
+1,Trump Media & Technology Group ,DJT,10.96,0.64,3068774144
+3,Western Union Company (The),WU,9.53,-1.75,3029061888
+2,"Euronet Worldwide, Inc.",EEFT,70.93,-0.11,2982229248
+1,Sezzle Inc.,SEZL,84.7,35.26,2892767744
+1,"Kyndryl Holdings, Inc.",KD,12.31,1.74,2823913984
+1,"Plug Power, Inc.",PLUG,1.91,0.0,2658023168
+1,"Highwoods Properties, Inc.",HIW,23.42,1.12,2622458112
+3,Park Hotels & Resorts Inc.,PK,11.71,4.0,2340987136
+1,First Advantage Corporation,FA,11.69,22.79,2035403776
+2,ZoomInfo Technologies Inc.,GTM,6.4,4.4,1953885824
+1,"nCino, Inc.",NCNO,16.63,5.19,1925998720
+1,Kemper Corporation,KMPR,32.47,3.05,1906462720
+3,FMC Corporation,FMC,14.6,-2.47,1823832960
+2,"DoubleVerify Holdings, Inc.",DV,9.53,0.0,1559378432

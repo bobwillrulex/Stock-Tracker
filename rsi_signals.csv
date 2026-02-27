@@ -1,0 +1,87 @@
+signal_type,stock_name,ticker,rsi,marketcap
+1,Alphabet Inc.,GOOGL,29.3,3718376062976
+1,Alphabet Inc.,GOOG,28.38,3715593666560
+1,International Business Machines,IBM,29.72,226215264256
+3,Thermo Fisher Scientific Inc,TMO,36.44,195413278720
+1,Medtronic plc.,MDT,29.36,124452233216
+3,Intuit Inc.,INTU,36.79,109806534656
+2,"PNC Financial Services Group, I",PNC,32.81,90089226240
+2,Nu Holdings Ltd.,NU,34.4,72974368768
+1,"W.W. Grainger, Inc.",GWW,29.94,52879503360
+3,Fastenal Company,FAST,41.0,52448825344
+3,Nucor Corporation,NUE,33.22,40189870080
+1,"Workday, Inc.",WDAY,29.75,37142368256
+3,Huntington Bancshares Incorpora,HBAN,33.91,35602558976
+3,Xylem Inc.,XYL,38.22,32138145792
+3,WSP GLOBAL INC,WSP.TO,37.5,31849445376
+1,Waters Corporation,WAT,24.23,31666241536
+3,Willis Towers Watson Public Lim,WTW,40.83,29518342144
+3,TELUS CORPORATION,T.TO,32.35,29221918720
+3,"IQVIA Holdings, Inc.",IQV,42.58,29059991552
+3,LPL Financial Holdings Inc.,LPLA,33.01,25583450112
+3,Fox Corporation,FOX,30.13,24290408448
+1,Fox Corporation,FOXA,27.45,24171003904
+3,"General Mills, Inc.",GIS,30.67,23973842944
+2,"Zoom Communications, Inc.",ZM,30.6,22608320512
+1,CGI INC,GIB-A.TO,23.88,21674899456
+1,Flutter Entertainment plc,FLUT,26.56,21580548096
+2,"First Solar, Inc.",FSLR,34.19,21472360448
+3,"NVR, Inc.",NVR,32.63,21108736000
+1,Atlassian Corporation,TEAM,29.6,20949192704
+3,"VeriSign, Inc.",VRSN,35.25,20884381696
+3,"RB Global, Inc.",RBA,35.09,18961004544
+3,Stifel Financial Corporation,SF,34.05,17980846080
+1,Weyerhaeuser Company,WY,20.33,17675511808
+1,TPG Inc.,TPG,29.96,17326352384
+1,Genuine Parts Company,GPC,17.92,16256452608
+2,"Fidelity National Financial, In",FNF,30.55,14163777536
+1,"Medpace Holdings, Inc.",MEDP,25.11,12688988160
+3,GoDaddy Inc.,GDDY,39.38,11934305280
+1,"Jack Henry & Associates, Inc.",JKHY,27.68,11658509312
+3,"Zillow Group, Inc.",Z,33.26,11297191936
+3,"Zillow Group, Inc.",ZG,33.35,11241849856
+1,"Donaldson Company, Inc.",DCI,16.58,10676186112
+3,"Ryan Specialty Holdings, Inc.",RYAN,32.07,10389326848
+2,Owens Corning Inc,OC,30.9,10225978368
+3,Qiagen N.V.,QGEN,34.75,10114158592
+3,U-Haul Holding Company,UHAL,50.79,9597682688
+3,HF Sinclair Corporation,DINO,33.18,9492467712
+3,"Tetra Tech, Inc.",TTEK,36.92,9263885312
+1,Bio-Techne Corp,TECH,28.9,9061774336
+3,"Rexford Industrial Realty, Inc.",REXR,42.02,9033225216
+1,"Halozyme Therapeutics, Inc.",HALO,29.03,8169136640
+3,UGI Corporation,UGI,45.74,8038054912
+3,"EPAM Systems, Inc.",EPAM,31.36,7720705536
+3,Repligen Corporation,RGEN,39.95,7527892992
+3,UWM Holdings Corporation,UWMC,36.96,7309761024
+3,"Planet Fitness, Inc.",PLNT,38.5,7056244224
+3,"STARWOOD PROPERTY TRUST, INC. S",STWD,46.5,6876756992
+1,"Lithia Motors, Inc.",LAD,20.82,6825413120
+3,Paylocity Holding Corporation,PCTY,35.3,6124456960
+1,Hamilton Lane Incorporated,HLNE,25.76,6032942080
+1,NewMarket Corp,NEU,29.75,5909438464
+3,Rithm Capital Corp.,RITM,37.12,5781161984
+3,"UiPath, Inc.",PATH,37.7,5727169024
+1,"Mattel, Inc.",MAT,27.93,5503176192
+1,"Thor Industries, Inc.",THO,17.35,5127463936
+3,"ExlService Holdings, Inc.",EXLS,48.85,5005292544
+3,"Schneider National, Inc.",SNDR,36.73,4921695744
+2,Seaboard Corporation,SEB,30.83,4776001536
+1,"Doximity, Inc.",DOCS,20.43,4725608960
+3,GitLab Inc.,GTLB,41.09,4696675840
+3,Sotera Health Company,SHC,36.9,4679026688
+1,SLM Corporation,SLM,21.07,4340966400
+2,"Shift4 Payments, Inc.",FOUR,30.88,4290056960
+1,Whirlpool Corporation,WHR,24.6,3907137536
+3,Graphic Packaging Holding Compa,GPK,34.81,3571049728
+3,"Hudson Pacific Properties, Inc.",HPP,48.51,3407655168
+2,FS KKR Capital Corp.,FSK,33.18,3161949952
+1,"Kyndryl Holdings, Inc.",KD,27.78,2823913984
+1,Robert Half Inc.,RHI,28.48,2503304192
+2,"Eos Energy Enterprises, Inc.",EOSE,31.39,2184421632
+1,"Flowers Foods, Inc.",FLO,22.07,2092776192
+3,Globant S.A.,GLOB,31.13,2064797184
+3,First Advantage Corporation,FA,46.52,2035403776
+3,"Inspire Medical Systems, Inc.",INSP,54.39,1977290368
+3,Kemper Corporation,KMPR,45.88,1906462720
+1,ManpowerGroup,MAN,22.69,1291691264
