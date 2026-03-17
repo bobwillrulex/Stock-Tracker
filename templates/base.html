@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stock Tracker Flask UI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <h1>Stock Tracker</h1>
+        <p class="muted">Unified Flask UI for signals, portfolio, watchlist, and stock detail.</p>
+      </div>
+      <div class="actions">
+        <form method="post" action="{{ url_for('run_scan') }}">
+          <button class="btn btn-primary" type="submit">{% if scan_state and scan_state.scan_running %}Scan Running...{% else %}Run Daily Scan{% endif %}</button>
+        </form>
+      </div>
+    </header>
+
+    <nav class="nav">
+      <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">Dashboard</a>
+      <a href="{{ url_for('portfolio') }}" class="{% if request.endpoint == 'portfolio' %}active{% endif %}">Portfolio & Watchlist</a>
+    </nav>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <section class="card">
+        {% for category, message in messages %}
+          <p class="flash {{ category }}">{{ message }}</p>
+        {% endfor %}
+      </section>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

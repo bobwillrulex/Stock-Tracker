@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>{{ payload.ticker }} — {{ payload.stock_name }}</h2>
+  <p class="muted">Current: ${{ '%.2f'|format(payload.current_price) }} | ATR: {{ '%.2f'|format(payload.atr) }}</p>
+  <h3>Trade Plan</h3>
+  <ul>
+    {% for level in payload.trade_plan.entry_levels %}<li>Entry {{ loop.index }}: ${{ '%.2f'|format(level) }}</li>{% endfor %}
+    {% for level in payload.trade_plan.take_profit_levels %}<li>TP {{ loop.index }}: ${{ '%.2f'|format(level) }}</li>{% endfor %}
+    <li>Stop Loss: ${{ '%.2f'|format(payload.trade_plan.stop_loss) }}</li>
+  </ul>
+
+  <h3>5-Day Forecast</h3>
+  <div class="forecast-grid">
+    {% for row in payload.forecast %}
+      <article class="tile">
+        <h3>Day {{ row.day }}</h3>
+        <p class="big {% if row.percentage >= 0 %}pos{% else %}neg{% endif %}">{{ '%+.2f'|format(row.percentage) }}%</p>
+        <p class="muted">Projected: ${{ '%.2f'|format(row.projected_price) }}</p>
+      </article>
+    {% endfor %}
+  </div>
+
+  <h3>Live Signal</h3>
+  {% if live %}
+    <p>{{ live.summary }} ({{ live.generated_at }})</p>
+  {% else %}
+    <p class="muted">No live signal snapshot available.</p>
+  {% endif %}
+</section>
+{% endblock %}
