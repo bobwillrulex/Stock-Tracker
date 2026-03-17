@@ -14,6 +14,7 @@
         <p class="muted">Unified Flask UI for signals, portfolio, watchlist, and stock detail.</p>
       </div>
       <div class="actions">
+        <p id="last-scan-date" class="scan-last">Last daily scan: {% if scan_state and scan_state.last_scan_completed_at %}{{ scan_state.last_scan_completed_at }}{% else %}--{% endif %}</p>
         <form method="post" action="{{ url_for('run_scan') }}">
           <button class="btn btn-primary" type="submit">{% if scan_state and scan_state.scan_running %}Scan Running...{% else %}Run Daily Scan{% endif %}</button>
         </form>
@@ -24,6 +25,13 @@
       <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">Dashboard</a>
       <a href="{{ url_for('portfolio') }}" class="{% if request.endpoint == 'portfolio' %}active{% endif %}">Portfolio & Watchlist</a>
     </nav>
+    <section id="scan-progress" class="card scan-progress {% if not (scan_state and scan_state.scan_running) %}hidden{% endif %}">
+      <div class="row">
+        <strong>Daily scan in progress...</strong>
+        <span id="scan-eta" class="muted"></span>
+      </div>
+      <div class="progress-track"><div class="progress-bar"></div></div>
+    </section>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -37,5 +45,49 @@
 
     {% block content %}{% endblock %}
   </main>
+
+  <script>
+    (function () {
+      const progressEl = document.getElementById('scan-progress');
+      const etaEl = document.getElementById('scan-eta');
+      const lastScanEl = document.getElementById('last-scan-date');
+      const expectedSeconds = 300;
+
+      function updateStatus(state) {
+        if (!state) return;
+        if (lastScanEl && state.last_scan_completed_at) {
+          lastScanEl.textContent = `Last daily scan: ${state.last_scan_completed_at}`;
+        }
+
+        if (state.scan_running) {
+          progressEl?.classList.remove('hidden');
+          if (etaEl && state.scan_started_at) {
+            const startedAt = new Date(state.scan_started_at + 'Z').getTime();
+            const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+            const remaining = Math.max(0, expectedSeconds - elapsed);
+            etaEl.textContent = `Est. time remaining: ~${Math.ceil(remaining / 60)} min`;
+          }
+        } else {
+          progressEl?.classList.add('hidden');
+          if (etaEl) etaEl.textContent = '';
+        }
+      }
+
+      async function pollStatus() {
+        try {
+          const res = await fetch("{{ url_for('status') }}", { cache: 'no-store' });
+          if (!res.ok) return;
+          const state = await res.json();
+          updateStatus(state);
+        } catch (err) {
+          // no-op for transient polling errors
+        }
+      }
+
+      updateStatus({{ (scan_state or {})|tojson }});
+      setInterval(pollStatus, 3000);
+    })();
+  </script>
+
 </body>
 </html>
