@@ -13,9 +13,14 @@
   <h3>5-Day Forecast</h3>
   <div class="forecast-grid">
     {% for row in payload.forecast %}
+      {% set pct = row.percentage if row.percentage is defined else (row.predicted_return * 100 if row.predicted_return is defined else none) %}
       <article class="tile">
         <h3>Day {{ row.day }}</h3>
-        <p class="big {% if row.percentage >= 0 %}pos{% else %}neg{% endif %}">{{ '%+.2f'|format(row.percentage) }}%</p>
+        {% if pct is not none %}
+          <p class="big {% if pct >= 0 %}pos{% else %}neg{% endif %}">{{ '%+.2f'|format(pct) }}%</p>
+        {% else %}
+          <p class="big muted">--</p>
+        {% endif %}
         <p class="muted">Projected: ${{ '%.2f'|format(row.projected_price) }}</p>
       </article>
     {% endfor %}
