@@ -60,6 +60,11 @@ PATIENCE = 5
 WEIGHT_DECAY = 1e-5
 GRAD_CLIP = 1.0
 VAL_SPLIT = 0.2
+SP500_EMPLOYEE_BOTS = [
+    {"name": "MomentumScout", "lr": LR_FINE_TUNE, "weight_decay": WEIGHT_DECAY, "epochs": 2, "batch_size": 32},
+    {"name": "TrendGuard", "lr": LR_FINE_TUNE * 0.6, "weight_decay": WEIGHT_DECAY * 5, "epochs": 3, "batch_size": 24},
+    {"name": "QuickMeanRev", "lr": LR_FINE_TUNE * 1.4, "weight_decay": WEIGHT_DECAY * 0.7, "epochs": 2, "batch_size": 40},
+]
 
 FEATURE_COLUMNS = [
     'Log_Ret', 'RSI', 'ATR', 'EMA20', 'EMA50', 'Vol_Change',
@@ -694,7 +699,7 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
         forecasts = []
         for r in sorted(entry.get("forecasts", []), key=lambda item: int(item.get("day", 0))):
             day = int(r.get("day", 0))
-            forecasts.append({"day": day, "percentage": float(r.get("percentage", 0) or 0), "confidence": float(r.get("confidence", 0) or 0), "label": day_labels.get(day, f"{day} days")})
+            forecasts.append({"day": day, "percentage": float(r.get("percentage", 0) or 0), "confidence": float(r.get("confidence", 0) or 0), "bot_name": str(r.get("bot_name") or "UnknownBot"), "label": day_labels.get(day, f"{day} days")})
         market_history_payload.append({"run_date": run_date, "forecasts": forecasts})
     market_history_json = json.dumps(market_history_payload)
 
@@ -726,7 +731,7 @@ def generate_github_pages_report(source_csv=SIGNALS_CSV_PATH, output_html=PAGES_
 const marketHistory = __MARKET_HISTORY_JSON__;
 const forecastText = document.getElementById('sp500-forecast-text');
 const forecastTabs = document.getElementById('sp500-forecast-tabs');
-const formatForecast = (row) => { const pct=Number(row?.percentage ?? 0); const conf=Number(row?.confidence ?? 0); const pctLabel=`${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`; const signClass=pct >= 0 ? 'positive' : 'negative'; return `<div class="forecast-card"><p class="forecast-label">${row?.label || 'N/A'}</p><span class="forecast-value ${signClass}">${pctLabel}</span><div class="forecast-conf">conf ${conf.toFixed(1)}%</div></div>`; };
+const formatForecast = (row) => { const pct=Number(row?.percentage ?? 0); const conf=Number(row?.confidence ?? 0); const bot=(row?.bot_name || 'UnknownBot'); const pctLabel=`${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`; const signClass=pct >= 0 ? 'positive' : 'negative'; return `<div class="forecast-card"><p class="forecast-label">${row?.label || 'N/A'}</p><span class="forecast-value ${signClass}">${pctLabel}</span><div class="forecast-conf">conf ${conf.toFixed(1)}% · bot ${bot}</div></div>`; };
 const renderForecast = (rows) => { if(!forecastText) return; if(!rows || rows.length === 0){ forecastText.textContent='No S&P 500 forecast data yet. Run a daily scan to generate it.'; return; } forecastText.innerHTML=`<div class="forecast-grid">${rows.map(formatForecast).join('')}</div>`; };
 const renderForecastTabs = () => { if(!forecastTabs) return; forecastTabs.innerHTML=''; if(!marketHistory || marketHistory.length === 0){ renderForecast([]); return; } let selected = marketHistory[0].run_date; const selectDate = (runDate) => { selected = runDate; Array.from(forecastTabs.querySelectorAll('button')).forEach((btn) => btn.classList.toggle('active', btn.dataset.runDate === selected)); const row = marketHistory.find((item) => item.run_date === selected); renderForecast(row?.forecasts || []); }; marketHistory.forEach((item) => { const button=document.createElement('button'); button.type='button'; button.className='forecast-tab'; button.dataset.runDate=item.run_date; const parsed=new Date(`${item.run_date}T00:00:00`); button.textContent=Number.isNaN(parsed.valueOf()) ? item.run_date : parsed.toLocaleDateString(undefined, { month:'short', day:'2-digit' }); button.addEventListener('click', () => selectDate(item.run_date)); forecastTabs.appendChild(button); }); selectDate(selected); };
 renderForecastTabs();
@@ -1032,10 +1037,11 @@ def write_sp500_forecast_csv(forecasts, path=MARKET_FORECAST_CSV_PATH):
                 "day": int(item.get("day", 0)),
                 "percentage": round(float(item.get("predicted_return", 0.0)) * 100, 2),
                 "confidence": round(float(item.get("confidence", 0.0)) * 100, 2),
+                "bot_name": str(item.get("bot_name") or "UnknownBot"),
             }
         )
 
-    pd.DataFrame(rows, columns=["day", "percentage", "confidence"]).to_csv(path, index=False)
+    pd.DataFrame(rows, columns=["day", "percentage", "confidence", "bot_name"]).to_csv(path, index=False)
     print(f"Wrote {len(rows)} S&P 500 forecast rows to {path}.")
 
 
@@ -1047,12 +1053,16 @@ def _ensure_sp500_forecast_table(conn):
             day INTEGER NOT NULL,
             percentage REAL NOT NULL,
             confidence REAL NOT NULL,
+            bot_name TEXT NOT NULL DEFAULT 'UnknownBot',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             PRIMARY KEY (run_date, day)
         )
         """
     )
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(sp500_forecast_history)").fetchall()}
+    if "bot_name" not in cols:
+        conn.execute("ALTER TABLE sp500_forecast_history ADD COLUMN bot_name TEXT NOT NULL DEFAULT 'UnknownBot'")
 
 
 def save_sp500_forecast_history(forecasts, db_path=MARKET_FORECAST_DB_PATH, run_date=None, days_to_keep=5):
@@ -1076,17 +1086,19 @@ def save_sp500_forecast_history(forecasts, db_path=MARKET_FORECAST_DB_PATH, run_
 
             percentage = round(float(item.get("predicted_return", 0.0)) * 100, 2)
             confidence = round(float(item.get("confidence", 0.0)) * 100, 2)
+            bot_name = str(item.get("bot_name") or "UnknownBot")
 
             conn.execute(
                 """
-                INSERT INTO sp500_forecast_history (run_date, day, percentage, confidence, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO sp500_forecast_history (run_date, day, percentage, confidence, bot_name, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(run_date, day) DO UPDATE SET
                     percentage=excluded.percentage,
                     confidence=excluded.confidence,
+                    bot_name=excluded.bot_name,
                     updated_at=excluded.updated_at
                 """,
-                (run_date_str, day, percentage, confidence, now_str, now_str),
+                (run_date_str, day, percentage, confidence, bot_name, now_str, now_str),
             )
 
         conn.execute(
@@ -1121,7 +1133,7 @@ def load_recent_sp500_forecast_history(db_path=MARKET_FORECAST_DB_PATH, days_to_
                 ORDER BY run_date DESC
                 LIMIT ?
             )
-            SELECT h.run_date, h.day, h.percentage, h.confidence
+            SELECT h.run_date, h.day, h.percentage, h.confidence, h.bot_name
             FROM sp500_forecast_history h
             INNER JOIN recent_dates r ON r.run_date = h.run_date
             ORDER BY h.run_date DESC, h.day ASC
@@ -1130,20 +1142,56 @@ def load_recent_sp500_forecast_history(db_path=MARKET_FORECAST_DB_PATH, days_to_
         ).fetchall()
 
     grouped = {}
-    for run_date, day, percentage, confidence in rows:
+    for run_date, day, percentage, confidence, bot_name in rows:
         grouped.setdefault(run_date, []).append(
             {
                 "day": int(day),
                 "percentage": float(percentage),
                 "confidence": float(confidence),
+                "bot_name": str(bot_name or "UnknownBot"),
             }
         )
 
     return [{"run_date": run_date, "forecasts": forecasts} for run_date, forecasts in grouped.items()]
 
 
+def _run_sp500_employee_bot(bot_config, base_model_state, X_train, y_train, X_val, y_val, X_pred):
+    """Train one employee bot and return prediction + validation MAE."""
+    model = PatternScannerLSTM(input_size=INPUT_SIZE).to(DEVICE)
+    model.load_state_dict(base_model_state)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(bot_config.get("lr", LR_FINE_TUNE)),
+        weight_decay=float(bot_config.get("weight_decay", WEIGHT_DECAY)),
+    )
+    loss_fn = nn.MSELoss()
+    batch_size = max(int(bot_config.get("batch_size", 32)), 8)
+    epochs = max(int(bot_config.get("epochs", 2)), 1)
+    seed = _stable_seed("sp500", bot_config.get("name", "bot"), len(X_train), len(X_val), float(y_train.mean().item()))
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(seed)
+    train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True, generator=generator)
+
+    for _ in range(epochs):
+        run_epoch(model, train_loader, optimizer, loss_fn, scaler=None)
+
+    model.eval()
+    with torch.no_grad():
+        pred = model(X_pred.unsqueeze(0).to(DEVICE)).item()
+        val_pred = model(X_val.to(DEVICE))
+        val_mae = torch.mean(torch.abs(val_pred - y_val.to(DEVICE))).item()
+        confidence = compute_confidence_score(model, X_val, y_val, pred)
+
+    return {
+        "bot_name": str(bot_config.get("name") or "UnknownBot"),
+        "predicted_return": float(pred),
+        "confidence": float(confidence),
+        "validation_mae": float(val_mae),
+    }
+
+
 def generate_sp500_forecast(base_model_state=None, checkpoint=None, ticker="^GSPC"):
-    """Generate next 1-5 day S&P 500 forecasts from the current global model."""
+    """Generate next 1-5 day S&P 500 forecasts via manager-selected employee bots."""
     try:
         if base_model_state is None:
             checkpoint = checkpoint or (BEST_MODEL_PATH if os.path.exists(BEST_MODEL_PATH) else MODEL_PATH)
@@ -1162,25 +1210,23 @@ def generate_sp500_forecast(base_model_state=None, checkpoint=None, ticker="^GSP
             if X_train is None:
                 continue
 
-            model = PatternScannerLSTM(input_size=INPUT_SIZE).to(DEVICE)
-            model.load_state_dict(base_model_state)
-            optimizer = torch.optim.AdamW(model.parameters(), lr=LR_FINE_TUNE, weight_decay=WEIGHT_DECAY)
-            loss_fn = nn.MSELoss()
+            candidates = []
+            for bot in SP500_EMPLOYEE_BOTS:
+                try:
+                    candidates.append(_run_sp500_employee_bot(bot, base_model_state, X_train, y_train, X_val, y_val, X_pred))
+                except Exception as exc:
+                    print(f"Skipping S&P employee bot {bot.get('name', 'UnknownBot')}: {exc}")
 
-            train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=32, shuffle=True)
-            for _ in range(2):
-                run_epoch(model, train_loader, optimizer, loss_fn, scaler=None)
+            if not candidates:
+                continue
 
-            model.eval()
-            with torch.no_grad():
-                pred = model(X_pred.unsqueeze(0).to(DEVICE)).item()
-                confidence = compute_confidence_score(model, X_val, y_val, pred)
-
+            winner = min(candidates, key=lambda item: item["validation_mae"])
             forecasts.append(
                 {
                     "day": horizon,
-                    "predicted_return": float(pred),
-                    "confidence": float(confidence),
+                    "predicted_return": float(winner["predicted_return"]),
+                    "confidence": float(winner["confidence"]),
+                    "bot_name": winner["bot_name"],
                 }
             )
 

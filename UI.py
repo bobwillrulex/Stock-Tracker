@@ -269,7 +269,7 @@ def load_rsi_rows(path=RSI_SIGNALS_CSV_PATH):
 
 
 def load_market_forecast_rows(path=MARKET_FORECAST_CSV_PATH):
-    rows = _load_csv_rows(path, ["day", "percentage", "confidence"])
+    rows = _load_csv_rows(path, ["day", "percentage", "confidence", "bot_name"])
     normalized = []
     for row in rows:
         day = int(pd.to_numeric(row.get("day", 0), errors="coerce") or 0)
@@ -280,6 +280,7 @@ def load_market_forecast_rows(path=MARKET_FORECAST_CSV_PATH):
                 "day": day,
                 "percentage": float(pd.to_numeric(row.get("percentage", 0), errors="coerce") or 0),
                 "confidence": float(pd.to_numeric(row.get("confidence", 0), errors="coerce") or 0),
+                "bot_name": str(row.get("bot_name") or "UnknownBot"),
             }
         )
     return sorted(normalized, key=lambda item: item["day"])
