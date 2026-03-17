@@ -13,6 +13,7 @@
         <h3>Day {{ row.day }}</h3>
         <p class="big {% if row.percentage >= 0 %}pos{% else %}neg{% endif %}">{{ '%+.2f'|format(row.percentage) }}%</p>
         <p class="muted">Confidence {{ '%.2f'|format(row.confidence) }}%</p>
+        <p class="muted">Bot {{ row.bot_name or 'UnknownBot' }}</p>
       </article>
     {% else %}
       <p class="muted">No forecast data yet.</p>
