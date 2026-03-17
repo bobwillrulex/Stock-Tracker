@@ -2,7 +2,7 @@
 {% block content %}
 <section class="card">
   <h2>{{ payload.ticker }} — {{ payload.stock_name }}</h2>
-  <p class="muted">Current: ${{ '%.2f'|format(payload.current_price) }} | ATR: {{ '%.2f'|format(payload.atr) }}</p>
+  <p class="muted">Current: ${{ '%.2f'|format(payload.current_price) }} | ATR: {% if atr_value is not none %}{{ '%.2f'|format(atr_value) }}{% else %}--{% endif %}</p>
   <h3>Trade Plan</h3>
   <ul>
     {% for level in payload.trade_plan.entry_levels %}<li>Entry {{ loop.index }}: ${{ '%.2f'|format(level) }}</li>{% endfor %}

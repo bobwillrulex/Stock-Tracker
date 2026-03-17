@@ -25,7 +25,13 @@ from UI import (
 app = Flask(__name__)
 app.secret_key = "stock-tracker-flask-ui"
 
-_state = {"scan_running": False, "scan_message": "Idle"}
+_state = {
+    "scan_running": False,
+    "scan_message": "Idle",
+    "scan_started_at": None,
+    "last_scan_completed_at": None,
+    "last_scan_failed_at": None,
+}
 
 
 def _to_float(value, default=0.0):
@@ -112,14 +118,26 @@ def _enrich_watchlist_rows():
 
 def _scan_job():
     _state["scan_running"] = True
+    _state["scan_started_at"] = datetime.utcnow().isoformat()
     _state["scan_message"] = "Running full market scan..."
     try:
         main.run_daily()
-        _state["scan_message"] = f"Last completed at {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+        completed_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        _state["last_scan_completed_at"] = completed_at
+        _state["last_scan_failed_at"] = None
+        _state["scan_message"] = f"Last completed at {completed_at}"
     except Exception as exc:
+        failed_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        _state["last_scan_failed_at"] = failed_at
         _state["scan_message"] = f"Scan failed: {exc}"
     finally:
         _state["scan_running"] = False
+        _state["scan_started_at"] = None
+
+
+@app.context_processor
+def inject_scan_state():
+    return {"scan_state": _state}
 
 
 @app.route("/")
@@ -202,7 +220,10 @@ def stock_detail(ticker):
         flash("Could not load stock detail.", "error")
         return redirect(url_for("dashboard"))
     live = main.load_latest_live_signal_snapshot(symbol)
-    return render_template("stock_detail.html", payload=payload, live=live)
+    atr_value = payload.get("atr")
+    if atr_value is None:
+        atr_value = payload.get("trade_plan", {}).get("atr")
+    return render_template("stock_detail.html", payload=payload, live=live, atr_value=atr_value)
 
 
 @app.post("/scan")
