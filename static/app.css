@@ -1,0 +1,12 @@
+:root{--bg:#0b1220;--panel:#131d31;--line:#263859;--text:#eaf2ff;--muted:#9bb0d1;--accent:#5aa8ff;--danger:#ff6f7d}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:radial-gradient(circle at top left,#203a69,#0b1220 45%);color:var(--text)}
+.page{max-width:1300px;margin:0 auto;padding:24px}.hero{display:flex;justify-content:space-between;align-items:center;background:rgba(19,29,49,.9);padding:20px;border:1px solid var(--line);border-radius:16px}
+.nav{display:flex;gap:8px;margin:14px 0}.nav a{text-decoration:none;color:var(--text);padding:8px 12px;border:1px solid var(--line);border-radius:999px}.nav a.active{border-color:var(--accent);color:var(--accent)}
+.card{background:rgba(19,29,49,.95);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}.table-wrap{overflow:auto}
+table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #243552;padding:9px;text-align:left;font-size:14px}
+.btn{border:1px solid var(--line);padding:8px 12px;border-radius:10px;background:#1c2a45;color:var(--text);cursor:pointer}.btn-primary{background:var(--accent);color:#041123}.danger{border-color:#7d2e3a;color:#ffbcc5}
+.form-grid{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;margin-bottom:12px}.form-grid input{background:#0e182a;border:1px solid var(--line);color:var(--text);padding:8px;border-radius:8px}
+.muted{color:var(--muted)}.forecast-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}.tile{background:#182540;border:1px solid var(--line);border-radius:10px;padding:10px}.big{font-size:22px;font-weight:700}.pos{color:#65df9e}.neg{color:#ff8a98}
+.tabs{display:flex;gap:8px;flex-wrap:wrap}.pill{text-decoration:none;color:var(--muted);border:1px solid var(--line);padding:5px 10px;border-radius:99px}.pill.active{color:var(--accent);border-color:var(--accent)}
+.watchlist-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.watch-card{background:#182540;border:1px solid var(--line);border-radius:12px;padding:12px}.row{display:flex;justify-content:space-between}
+.flash{padding:8px;border-radius:8px}.flash.success{background:#173425;color:#9ef0bf}.flash.error{background:#3e1b22;color:#ffc2ca}

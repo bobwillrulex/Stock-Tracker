@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>S&P 500 5-day forecast</h2>
+  <div class="tabs">
+    {% for item in forecast_history %}
+      <a class="pill {% if selected_date == item.run_date %}active{% endif %}" href="{{ url_for('dashboard', forecast_date=item.run_date) }}">{{ item.run_date }}</a>
+    {% endfor %}
+  </div>
+  <div class="forecast-grid">
+    {% for row in forecast_rows %}
+      <article class="tile">
+        <h3>Day {{ row.day }}</h3>
+        <p class="big {% if row.percentage >= 0 %}pos{% else %}neg{% endif %}">{{ '%+.2f'|format(row.percentage) }}%</p>
+        <p class="muted">Confidence {{ '%.2f'|format(row.confidence) }}%</p>
+      </article>
+    {% else %}
+      <p class="muted">No forecast data yet.</p>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <h2>AI Signals</h2>
+  <div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Stock</th><th>5D Return</th><th>Confidence</th><th>Market Cap</th><th></th></tr></thead><tbody>
+    {% for row in ai_rows %}
+    <tr><td>{{ row.ticker }}</td><td>{{ row.stock_name }}</td><td>{{ '%+.2f'|format(row.percentage) }}%</td><td>{{ '%.2f'|format(row.confidence) }}%</td><td>{{ format_mcap(row.marketcap) }}</td><td><a href="{{ url_for('stock_detail', ticker=row.ticker) }}">Detail</a></td></tr>
+    {% endfor %}
+  </tbody></table></div>
+</section>
+
+<section class="split">
+  <div class="card">
+    <h2>MACD Signals</h2>
+    <div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Type</th><th>Price</th><th>Change</th></tr></thead><tbody>
+      {% for row in macd_rows %}
+      <tr><td>{{ row.ticker }}</td><td>{{ row.signal_type }}</td><td>${{ '%.2f'|format(row.price) }}</td><td>{{ '%+.2f'|format(row.change_pct) }}%</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+  </div>
+  <div class="card">
+    <h2>RSI Signals</h2>
+    <div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Type</th><th>RSI</th></tr></thead><tbody>
+      {% for row in rsi_rows %}
+      <tr><td>{{ row.ticker }}</td><td>{{ row.signal_type }}</td><td>{{ '%.2f'|format(row.rsi) }}</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+  </div>
+</section>
+{% endblock %}
