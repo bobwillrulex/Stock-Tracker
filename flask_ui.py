@@ -18,6 +18,7 @@ from UI import (
     load_market_forecast_history,
     load_market_forecast_rows,
     load_portfolio_positions,
+    load_fvg_rows,
     load_rsi_rows,
     load_watchlist_items,
     normalize_ticker_input,
@@ -285,13 +286,22 @@ def dashboard():
     return render_template(
         "dashboard.html",
         ai_rows=load_ai_rows(),
-        macd_rows=load_macd_rows(),
-        rsi_rows=load_rsi_rows(),
         forecast_rows=selected["forecasts"] if selected else load_market_forecast_rows(),
         forecast_history=forecast_history,
         selected_date=selected_date,
         scan_state=_state,
         format_mcap=format_mcap,
+    )
+
+
+@app.route("/rules")
+def rules():
+    return render_template(
+        "rules.html",
+        macd_rows=load_macd_rows(),
+        rsi_rows=load_rsi_rows(),
+        fvg_rows=load_fvg_rows(),
+        scan_state=_state,
     )
 
 

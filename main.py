@@ -37,6 +37,7 @@ WEEKLY_STATE = "weekly_state.json"
 SIGNALS_CSV_PATH = "buy_signals.csv"
 MACD_SIGNALS_CSV_PATH = "macd_signals.csv"
 RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
+FVG_SIGNALS_CSV_PATH = "fvg_signals.csv"
 MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
 MARKET_FORECAST_DB_PATH = "sp500_forecast.db"
 LIVE_SIGNAL_DB_PATH = "live_trading_signals.db"
@@ -295,24 +296,80 @@ def classify_rsi_signal(close_series, period=14):
     return 0, current_rsi
 
 
-def write_technical_signals_csv(macd_signals, rsi_signals):
-    """Persist flat MACD/RSI technical signal lists for UI tabs."""
+def detect_bullish_fvg_signal(price_df, threshold_pct=0.0, auto_threshold=True, lookback=120):
+    """Detect bullish FVG using LuxAlgo-like rules.
+
+    Rules:
+    - low(t) > high(t-2)
+    - close(t-1) > high(t-2)
+    - gap_pct >= threshold
+    """
+    frame = _normalize_ohlcv_dataframe(price_df)
+    if frame is None or len(frame) < 3:
+        return None
+
+    low = _coerce_to_series(frame.get("Low"))
+    high = _coerce_to_series(frame.get("High"))
+    close = _coerce_to_series(frame.get("Close"))
+    if low is None or high is None or close is None:
+        return None
+    if len(low) < 3 or len(high) < 3 or len(close) < 3:
+        return None
+
+    low_t = float(low.iloc[-1])
+    high_t2 = float(high.iloc[-3])
+    close_t1 = float(close.iloc[-2])
+    if high_t2 == 0:
+        return None
+
+    gap_pct = ((low_t - high_t2) / high_t2) * 100.0
+
+    threshold = max(float(threshold_pct or 0.0), 0.0)
+    if auto_threshold:
+        rel_heights = ((low - high.shift(2)) / high.shift(2)) * 100.0
+        rel_heights = rel_heights.replace([np.inf, -np.inf], np.nan).dropna()
+        rel_heights = rel_heights[rel_heights > 0]
+        if not rel_heights.empty:
+            window = rel_heights.tail(max(int(lookback), 10))
+            auto_value = float(window.mean())
+            threshold = max(threshold, auto_value)
+
+    is_bullish_fvg = (low_t > high_t2) and (close_t1 > high_t2) and (gap_pct >= threshold)
+    if not is_bullish_fvg:
+        return None
+
+    return {
+        "lower_level": round(high_t2, 4),
+        "upper_level": round(low_t, 4),
+        "gap_pct": round(gap_pct, 3),
+        "threshold_pct": round(threshold, 3),
+    }
+
+
+def write_technical_signals_csv(macd_signals, rsi_signals, fvg_signals):
+    """Persist MACD/RSI/FVG technical signal lists for UI tabs."""
     macd_cols = ["signal_type", "stock_name", "ticker", "price", "change_pct", "marketcap"]
     rsi_cols = ["signal_type", "stock_name", "ticker", "rsi", "marketcap"]
+    fvg_cols = ["stock_name", "ticker", "price", "change_pct", "fvg_gap_pct", "threshold_pct", "fvg_lower", "fvg_upper", "marketcap"]
 
     macd_df = pd.DataFrame(macd_signals, columns=macd_cols)
     rsi_df = pd.DataFrame(rsi_signals, columns=rsi_cols)
+    fvg_df = pd.DataFrame(fvg_signals, columns=fvg_cols)
 
     if not macd_df.empty:
         macd_df = macd_df.sort_values(by="marketcap", ascending=False)
     if not rsi_df.empty:
         rsi_df = rsi_df.sort_values(by="marketcap", ascending=False)
+    if not fvg_df.empty:
+        fvg_df = fvg_df.sort_values(by="marketcap", ascending=False)
 
     macd_df.to_csv(MACD_SIGNALS_CSV_PATH, index=False)
     rsi_df.to_csv(RSI_SIGNALS_CSV_PATH, index=False)
+    fvg_df.to_csv(FVG_SIGNALS_CSV_PATH, index=False)
 
     print(f"Wrote {len(macd_df)} MACD signals to {MACD_SIGNALS_CSV_PATH}.")
     print(f"Wrote {len(rsi_df)} RSI signals to {RSI_SIGNALS_CSV_PATH}.")
+    print(f"Wrote {len(fvg_df)} bullish FVG signals to {FVG_SIGNALS_CSV_PATH}.")
 
 
 def _load_watchlist_rows(path="watchlist.db"):
@@ -1960,6 +2017,7 @@ def run_daily(tickers=None, progress_callback=None):
     buy_signals = []
     macd_signals = []
     rsi_signals = []
+    fvg_signals = []
 
     # Save clean global weights once
     base_state = {k: v.clone() for k, v in model.state_dict().items()}
@@ -2019,6 +2077,7 @@ def run_daily(tickers=None, progress_callback=None):
         if close_series is not None and len(close_series) > 30:
             macd_type = classify_macd_signal(close_series)
             rsi_type, rsi_value = classify_rsi_signal(close_series)
+            bullish_fvg = detect_bullish_fvg_signal(ticker_df, threshold_pct=0.1, auto_threshold=True)
 
             if macd_type in (1, 2, 3):
                 metadata = get_ticker_metadata(t)
@@ -2048,13 +2107,32 @@ def run_daily(tickers=None, progress_callback=None):
                     }
                 )
 
+            if bullish_fvg is not None:
+                metadata = get_ticker_metadata(t)
+                close_today = float(close_series.iloc[-1])
+                close_prev = float(close_series.iloc[-2])
+                change_pct = ((close_today - close_prev) / close_prev) * 100 if close_prev else 0.0
+                fvg_signals.append(
+                    {
+                        "stock_name": metadata["stock_name"],
+                        "ticker": t,
+                        "price": round(close_today, 2),
+                        "change_pct": round(change_pct, 2),
+                        "fvg_gap_pct": bullish_fvg["gap_pct"],
+                        "threshold_pct": bullish_fvg["threshold_pct"],
+                        "fvg_lower": bullish_fvg["lower_level"],
+                        "fvg_upper": bullish_fvg["upper_level"],
+                        "marketcap": metadata["marketcap"],
+                    }
+                )
+
         time.sleep(0.1)
         processed += 1
         emit_progress("scan", processed, total_tickers, f"Daily scan: {processed}/{total_tickers} ({t})")
 
     torch.save(base_state, MODEL_PATH)
     write_buy_signals_csv(buy_signals)
-    write_technical_signals_csv(macd_signals, rsi_signals)
+    write_technical_signals_csv(macd_signals, rsi_signals, fvg_signals)
     generate_sp500_forecast(base_model_state=base_state)
     generate_github_pages_report()
     auto_commit_and_push_pages([SIGNALS_CSV_PATH, PAGES_INDEX_PATH, PAGES_NOJEKYLL_PATH])
