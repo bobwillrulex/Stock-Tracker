@@ -30,22 +30,4 @@
   </tbody></table></div>
 </section>
 
-<section class="split">
-  <div class="card">
-    <h2>MACD Signals</h2>
-    <div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Type</th><th>Price</th><th>Change</th></tr></thead><tbody>
-      {% for row in macd_rows %}
-      <tr><td>{{ row.ticker }}</td><td>{{ row.signal_type }}</td><td>${{ '%.2f'|format(row.price) }}</td><td>{{ '%+.2f'|format(row.change_pct) }}%</td></tr>
-      {% endfor %}
-    </tbody></table></div>
-  </div>
-  <div class="card">
-    <h2>RSI Signals</h2>
-    <div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Type</th><th>RSI</th></tr></thead><tbody>
-      {% for row in rsi_rows %}
-      <tr><td>{{ row.ticker }}</td><td>{{ row.signal_type }}</td><td>{{ '%.2f'|format(row.rsi) }}</td></tr>
-      {% endfor %}
-    </tbody></table></div>
-  </div>
-</section>
 {% endblock %}

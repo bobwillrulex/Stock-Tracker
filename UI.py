@@ -30,6 +30,7 @@ import main
 SIGNALS_CSV_PATH = "buy_signals.csv"
 MACD_SIGNALS_CSV_PATH = "macd_signals.csv"
 RSI_SIGNALS_CSV_PATH = "rsi_signals.csv"
+FVG_SIGNALS_CSV_PATH = "fvg_signals.csv"
 MARKET_FORECAST_CSV_PATH = "sp500_forecast.csv"
 WATCHLIST_DB_PATH = "watchlist.db"
 TV_LAYOUT_ID = "ClEM8BLT"
@@ -263,6 +264,18 @@ def load_rsi_rows(path=RSI_SIGNALS_CSV_PATH):
     for row in rows:
         row["signal_type"] = int(pd.to_numeric(row.get("signal_type", 0), errors="coerce") or 0)
         row["rsi"] = float(pd.to_numeric(row.get("rsi", 0), errors="coerce") or 0)
+    return rows
+
+
+def load_fvg_rows(path=FVG_SIGNALS_CSV_PATH):
+    rows = _load_csv_rows(path, ["stock_name", "ticker", "price", "change_pct", "fvg_gap_pct", "threshold_pct", "fvg_lower", "fvg_upper", "marketcap"])
+    for row in rows:
+        row["price"] = float(pd.to_numeric(row.get("price", 0), errors="coerce") or 0)
+        row["change_pct"] = float(pd.to_numeric(row.get("change_pct", 0), errors="coerce") or 0)
+        row["fvg_gap_pct"] = float(pd.to_numeric(row.get("fvg_gap_pct", 0), errors="coerce") or 0)
+        row["threshold_pct"] = float(pd.to_numeric(row.get("threshold_pct", 0), errors="coerce") or 0)
+        row["fvg_lower"] = float(pd.to_numeric(row.get("fvg_lower", 0), errors="coerce") or 0)
+        row["fvg_upper"] = float(pd.to_numeric(row.get("fvg_upper", 0), errors="coerce") or 0)
     return rows
 
 

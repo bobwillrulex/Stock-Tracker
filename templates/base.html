@@ -22,7 +22,8 @@
     </header>
 
     <nav class="nav">
-      <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">Dashboard</a>
+      <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">AI Recommendations</a>
+      <a href="{{ url_for('rules') }}" class="{% if request.endpoint == 'rules' %}active{% endif %}">Rule Recommendations</a>
       <a href="{{ url_for('portfolio') }}" class="{% if request.endpoint == 'portfolio' %}active{% endif %}">Portfolio & Watchlist</a>
     </nav>
     <section id="scan-progress" class="card scan-progress {% if not (scan_state and scan_state.scan_running) %}hidden{% endif %}">
