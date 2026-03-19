@@ -24,7 +24,7 @@
     <nav class="nav">
       <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">AI Recommendations</a>
       <a href="{{ url_for('rules') }}" class="{% if request.endpoint == 'rules' %}active{% endif %}">Rule Recommendations</a>
-      <a href="{{ url_for('portfolio') }}" class="{% if request.endpoint == 'portfolio' %}active{% endif %}">Portfolio & Watchlist</a>
+      <a href="{{ url_for('portfolio') }}" class="{% if request.endpoint == 'portfolio' %}active{% endif %}">Portfolio</a>
     </nav>
     <section id="scan-progress" class="card scan-progress {% if not (scan_state and scan_state.scan_running) %}hidden{% endif %}">
       <div class="row">
@@ -44,7 +44,41 @@
       {% endif %}
     {% endwith %}
 
-    {% block content %}{% endblock %}
+    <section class="page-shell">
+      <section class="content-panel">
+        {% block content %}{% endblock %}
+      </section>
+
+      <aside class="watchlist-sidebar card">
+        <div class="watchlist-header">
+          <h2>Watchlist</h2>
+          <form class="watchlist-add" method="post" action="{{ url_for('add_watchlist') }}">
+            <input name="ticker" placeholder="Ticker" required />
+            <input name="name" placeholder="Name (optional)" />
+            <button class="btn" type="submit">Add</button>
+          </form>
+        </div>
+
+        <div class="watchlist-grid pinned">
+          {% for item in global_watchlist %}
+          <article class="watch-card">
+            <h3>{{ item.ticker }}</h3>
+            <p>{{ item.name }}</p>
+            <p>Price: {% if item.price is not none %}${{ '%.2f'|format(item.price) }}{% else %}--{% endif %}</p>
+            <p>Day: {% if item.change_pct is not none %}{{ '%+.2f'|format(item.change_pct) }}%{% else %}--{% endif %}</p>
+            <p>AI 5D: {% if item.ai_5d is not none %}{{ '%+.2f'|format(item.ai_5d) }}%{% else %}--{% endif %}</p>
+            <div class="row">
+              <a href="{{ url_for('stock_detail', ticker=item.ticker) }}">View Details</a>
+              <a href="https://www.tradingview.com/symbols/{{ item.tv_symbol }}/" target="_blank" rel="noopener">TradingView</a>
+            </div>
+            <form method="post" action="{{ url_for('remove_watchlist', ticker=item.ticker) }}"><button class="btn danger" type="submit">Remove</button></form>
+          </article>
+          {% else %}
+          <p class="muted">No watchlist items yet.</p>
+          {% endfor %}
+        </div>
+      </aside>
+    </section>
   </main>
 
   <script>

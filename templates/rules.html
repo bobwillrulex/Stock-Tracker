@@ -1,46 +1,58 @@
 {% extends 'base.html' %}
 {% block content %}
-<section class="split">
-  <div class="card">
+<section class="signal-grid-three">
+  <div class="card compact-card">
     <h2>MACD Signals</h2>
-    <div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Type</th><th>Price</th><th>Change</th></tr></thead><tbody>
+    <div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Stock</th><th>Signal</th><th>Price</th><th>Change</th><th></th></tr></thead><tbody>
       {% for row in macd_rows %}
-      <tr><td>{{ row.ticker }}</td><td>{{ row.signal_type }}</td><td>${{ '%.2f'|format(row.price) }}</td><td>{{ '%+.2f'|format(row.change_pct) }}%</td></tr>
+      <tr>
+        <td>{{ row.ticker }}</td>
+        <td>{{ row.stock_name or row.ticker }}</td>
+        <td>{% if row.signal_type > 0 %}Bullish{% elif row.signal_type < 0 %}Bearish{% else %}Neutral{% endif %}</td>
+        <td>${{ '%.2f'|format(row.price) }}</td>
+        <td>{{ '%+.2f'|format(row.change_pct) }}%</td>
+        <td><a href="{{ url_for('stock_detail', ticker=row.ticker) }}">View Details</a></td>
+      </tr>
       {% else %}
-      <tr><td colspan="4" class="muted">No MACD signals.</td></tr>
+      <tr><td colspan="6" class="muted">No MACD signals.</td></tr>
       {% endfor %}
     </tbody></table></div>
   </div>
 
-  <div class="card">
+  <div class="card compact-card">
     <h2>RSI Signals</h2>
-    <div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Type</th><th>RSI</th></tr></thead><tbody>
+    <div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Stock</th><th>Signal</th><th>RSI</th><th></th></tr></thead><tbody>
       {% for row in rsi_rows %}
-      <tr><td>{{ row.ticker }}</td><td>{{ row.signal_type }}</td><td>{{ '%.2f'|format(row.rsi) }}</td></tr>
+      <tr>
+        <td>{{ row.ticker }}</td>
+        <td>{{ row.stock_name or row.ticker }}</td>
+        <td>{% if row.signal_type > 0 %}Oversold (Buy){% elif row.signal_type < 0 %}Overbought (Sell){% else %}Neutral{% endif %}</td>
+        <td>{{ '%.2f'|format(row.rsi) }}</td>
+        <td><a href="{{ url_for('stock_detail', ticker=row.ticker) }}">View Details</a></td>
+      </tr>
       {% else %}
-      <tr><td colspan="3" class="muted">No RSI signals.</td></tr>
+      <tr><td colspan="5" class="muted">No RSI signals.</td></tr>
       {% endfor %}
     </tbody></table></div>
   </div>
-</section>
 
-<section class="card">
-  <h2>Bullish FVG Signals (LuxAlgo-style)</h2>
-  <p class="muted">Only bullish fair value gaps are listed. Conditions use low &gt; high(t-2), close(t-1) &gt; high(t-2), and gap % above threshold.</p>
-  <div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Price</th><th>Day Change</th><th>Gap %</th><th>Threshold %</th><th>FVG Lower</th><th>FVG Upper</th></tr></thead><tbody>
-    {% for row in fvg_rows %}
-    <tr>
-      <td>{{ row.ticker }}</td>
-      <td>${{ '%.2f'|format(row.price) }}</td>
-      <td>{{ '%+.2f'|format(row.change_pct) }}%</td>
-      <td>{{ '%.3f'|format(row.fvg_gap_pct) }}%</td>
-      <td>{{ '%.3f'|format(row.threshold_pct) }}%</td>
-      <td>${{ '%.2f'|format(row.fvg_lower) }}</td>
-      <td>${{ '%.2f'|format(row.fvg_upper) }}</td>
-    </tr>
-    {% else %}
-    <tr><td colspan="7" class="muted">No bullish FVG signals.</td></tr>
-    {% endfor %}
-  </tbody></table></div>
+  <div class="card compact-card">
+    <h2>Bullish FVG Signals</h2>
+    <p class="muted">LuxAlgo-style bullish fair value gaps.</p>
+    <div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Stock</th><th>Price</th><th>Gap %</th><th>Range</th><th></th></tr></thead><tbody>
+      {% for row in fvg_rows %}
+      <tr>
+        <td>{{ row.ticker }}</td>
+        <td>{{ row.stock_name or row.ticker }}</td>
+        <td>${{ '%.2f'|format(row.price) }}</td>
+        <td>{{ '%.3f'|format(row.fvg_gap_pct) }}%</td>
+        <td>${{ '%.2f'|format(row.fvg_lower) }} - ${{ '%.2f'|format(row.fvg_upper) }}</td>
+        <td><a href="{{ url_for('stock_detail', ticker=row.ticker) }}">View Details</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">No bullish FVG signals.</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+  </div>
 </section>
 {% endblock %}
