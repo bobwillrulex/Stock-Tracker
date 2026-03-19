@@ -267,7 +267,7 @@ def _build_detail_chart_base64(payload):
 
 @app.context_processor
 def inject_scan_state():
-    return {"scan_state": _state}
+    return {"scan_state": _state, "global_watchlist": _enrich_watchlist_rows()}
 
 
 @app.route("/")
@@ -310,7 +310,6 @@ def portfolio():
     return render_template(
         "portfolio.html",
         positions=_enrich_portfolio_rows(),
-        watchlist=_enrich_watchlist_rows(),
         scan_state=_state,
     )
 
